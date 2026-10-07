@@ -1,0 +1,1841 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "API System Perpustakaan Kabupaten Buleleng",
+        "description": "Dokumentasi RESTful API Interaktif Sistem Manajemen Perpustakaan Daerah Kabupaten Buleleng",
+        "version": "1.0.0"
+    },
+    "servers": [
+        {
+            "url": "http://localhost:8000",
+            "description": "Base API Server Perpustakaan"
+        }
+    ],
+    "paths": {
+        "/admin/reports/circulation": {
+            "get": {
+                "tags": [
+                    "Laporan Executif"
+                ],
+                "summary": "Laporan Sirkulasi & Kinerja Operator",
+                "description": "Menampilkan agregasi total transaksi peminjaman, pengembalian, overdue, denda, top buku, top anggota, dan kinerja staf operator.",
+                "operationId": "getCirculationReport",
+                "parameters": [
+                    {
+                        "name": "start_date",
+                        "in": "query",
+                        "description": "Tanggal awal (YYYY-MM-DD)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "end_date",
+                        "in": "query",
+                        "description": "Tanggal akhir (YYYY-MM-DD)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "export_type",
+                        "in": "query",
+                        "description": "Tipe ekspor response (view/json, pdf, excel)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "view",
+                            "enum": [
+                                "view",
+                                "pdf",
+                                "excel"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Laporan sirkulasi berhasil diambil / diunduh",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Data laporan berhasil diambil."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/reports/members": {
+            "get": {
+                "tags": [
+                    "Laporan Executif"
+                ],
+                "summary": "Laporan Penambahan Anggota Perpustakaan",
+                "description": "Menampilkan total penambahan anggota baru dan breakdown statistik berdasarkan kategori pekerjaan.",
+                "operationId": "getMemberReport",
+                "parameters": [
+                    {
+                        "name": "start_date",
+                        "in": "query",
+                        "description": "Tanggal awal (YYYY-MM-DD)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "end_date",
+                        "in": "query",
+                        "description": "Tanggal akhir (YYYY-MM-DD)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "export_type",
+                        "in": "query",
+                        "description": "Tipe ekspor response (view/json, pdf, excel)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "view",
+                            "enum": [
+                                "view",
+                                "pdf",
+                                "excel"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Laporan penambahan anggota berhasil diambil / diunduh",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Data laporan berhasil diambil."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/reports/catalogs": {
+            "get": {
+                "tags": [
+                    "Laporan Executif"
+                ],
+                "summary": "Laporan Katalog & Koleksi Perpustakaan",
+                "description": "Menampilkan statistik judul katalog, jumlah eksemplar, ketersediaan fisik, serta kondisi karantina.",
+                "operationId": "getCatalogReport",
+                "parameters": [
+                    {
+                        "name": "start_date",
+                        "in": "query",
+                        "description": "Tanggal awal (YYYY-MM-DD)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "end_date",
+                        "in": "query",
+                        "description": "Tanggal akhir (YYYY-MM-DD)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "export_type",
+                        "in": "query",
+                        "description": "Tipe ekspor response (view/json, pdf, excel)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "view",
+                            "enum": [
+                                "view",
+                                "pdf",
+                                "excel"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Laporan katalog dan koleksi berhasil diambil / diunduh",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Data laporan berhasil diambil."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/reports/onsite-readings": {
+            "get": {
+                "tags": [
+                    "Laporan Executif"
+                ],
+                "summary": "Laporan Aktivitas Baca di Tempat (Onsite)",
+                "description": "Menampilkan total aktivitas baca di tempat, rasio anggota vs non-anggota, dan Top 10 koleksi paling sering dibaca di tempat.",
+                "operationId": "getOnsiteReadingReport",
+                "parameters": [
+                    {
+                        "name": "start_date",
+                        "in": "query",
+                        "description": "Tanggal awal (YYYY-MM-DD)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "end_date",
+                        "in": "query",
+                        "description": "Tanggal akhir (YYYY-MM-DD)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "export_type",
+                        "in": "query",
+                        "description": "Tipe ekspor response (view/json, pdf, excel)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "view",
+                            "enum": [
+                                "view",
+                                "pdf",
+                                "excel"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Laporan baca di tempat berhasil diambil / diunduh",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Data laporan berhasil diambil."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/reports/guestbooks": {
+            "get": {
+                "tags": [
+                    "Laporan Executif"
+                ],
+                "summary": "Laporan Buku Tamu & Kunjungan Perpustakaan",
+                "description": "Menampilkan total pengunjung, demografi gender (laki-laki/perempuan), rincian tipe kunjungan, serta agregasi demografi pekerjaan dan pendidikan.",
+                "operationId": "getGuestbookReport",
+                "parameters": [
+                    {
+                        "name": "start_date",
+                        "in": "query",
+                        "description": "Tanggal awal (YYYY-MM-DD)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "end_date",
+                        "in": "query",
+                        "description": "Tanggal akhir (YYYY-MM-DD)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "export_type",
+                        "in": "query",
+                        "description": "Tipe ekspor response (view/json, pdf, excel)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "view",
+                            "enum": [
+                                "view",
+                                "pdf",
+                                "excel"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Laporan buku tamu berhasil diambil / diunduh",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Data laporan berhasil diambil."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/admin/circulation/loans": {
+            "get": {
+                "tags": [
+                    "Sirkulasi"
+                ],
+                "summary": "List transaksi sirkulasi",
+                "description": "Menampilkan seluruh daftar transaksi sirkulasi dengan pencarian dan filter status.",
+                "operationId": "getCirculationLoans",
+                "parameters": [
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "description": "Filter status transaksi (ALL, PENDING_CHECK, READY_FOR_PICKUP, BORROWED, RETURNED, OVERDUE, UNAVAILABLE)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "ALL"
+                        }
+                    },
+                    {
+                        "name": "search",
+                        "in": "query",
+                        "description": "Pencarian kode reservasi, no peminjaman, nama member, atau barcode buku",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Daftar transaksi sirkulasi berhasil diambil",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Daftar transaksi sirkulasi berhasil diambil."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/circulation/borrow": {
+            "post": {
+                "tags": [
+                    "Sirkulasi"
+                ],
+                "summary": "Direct borrow offline (Peminjaman Langsung)",
+                "description": "Petugas loket memproses peminjaman langsung buku fisik kepada anggota.",
+                "operationId": "storeDirectBorrow",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "member_no",
+                                    "book_barcode"
+                                ],
+                                "properties": {
+                                    "member_no": {
+                                        "description": "Barcode kartu member",
+                                        "type": "string",
+                                        "example": "MEM-202610-0001"
+                                    },
+                                    "book_barcode": {
+                                        "description": "Barcode eksemplar buku",
+                                        "type": "string",
+                                        "example": "COL-1001"
+                                    },
+                                    "duration_days": {
+                                        "description": "Durasi peminjaman (default 7 hari)",
+                                        "type": "integer",
+                                        "example": 7
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Peminjaman langsung berhasil dicatat",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Peminjaman langsung berhasil dicatat! No. Peminjaman: LON-20261005-0001."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validasi gagal / Kuota peminjaman penuh",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": false
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Batas maksimal peminjaman dan reservasi aktif adalah 3 buku."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/admin/circulation/confirm-reservation": {
+            "post": {
+                "tags": [
+                    "Sirkulasi"
+                ],
+                "summary": "Konfirmasi Pengambilan Buku Reservasi di Loket",
+                "description": "Petugas menyerahkan buku reservasi ke member dan mengubah status menjadi BORROWED.",
+                "operationId": "confirmReservationPickup",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "reservation_code"
+                                ],
+                                "properties": {
+                                    "reservation_code": {
+                                        "type": "string",
+                                        "example": "RSV-20261005-0001"
+                                    },
+                                    "duration_days": {
+                                        "type": "integer",
+                                        "example": 7
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Reservasi berhasil dikonfirmasi menjadi BORROWED",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Reservasi RSV-20261005-0001 berhasil dikonfirmasi! Status menjadi BORROWED."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/circulation/return": {
+            "post": {
+                "tags": [
+                    "Sirkulasi"
+                ],
+                "summary": "Pengembalian & kalkulasi denda",
+                "description": "Petugas memproses pengembalian buku, otomatis menghitung hari keterlambatan dan nominal denda.",
+                "operationId": "returnLoanBook",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "member_no",
+                                    "book_barcode"
+                                ],
+                                "properties": {
+                                    "member_no": {
+                                        "type": "string",
+                                        "example": "MEM-202610-0001"
+                                    },
+                                    "book_barcode": {
+                                        "type": "string",
+                                        "example": "COL-1001"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Buku berhasil dikembalikan",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Buku dengan barcode 'COL-1001' berhasil dikembalikan."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/circulation/renew": {
+            "post": {
+                "tags": [
+                    "Sirkulasi"
+                ],
+                "summary": "Perpanjangan buku",
+                "description": "Memperpanjang masa pinjam buku yang sedang dipinjam (+7 hari).",
+                "operationId": "renewLoanBook",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "book_barcode"
+                                ],
+                                "properties": {
+                                    "book_barcode": {
+                                        "type": "string",
+                                        "example": "COL-1001"
+                                    },
+                                    "extension_days": {
+                                        "type": "integer",
+                                        "example": 7
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Peminjaman berhasil diperpanjang",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Peminjaman buku barcode 'COL-1001' berhasil diperpanjang."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/circulation/reservations/pending": {
+            "get": {
+                "tags": [
+                    "Sirkulasi"
+                ],
+                "summary": "List reservasi perlu verifikasi fisik",
+                "description": "Menampilkan daftar seluruh reservasi online baru dengan status PENDING_CHECK yang memerlukan verifikasi fisik di rak oleh petugas.",
+                "operationId": "getPendingReservations",
+                "responses": {
+                    "200": {
+                        "description": "Daftar reservasi pending berhasil diambil",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Daftar reservasi pending untuk verifikasi rak berhasil diambil."
+                                        },
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object"
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/circulation/reservations/{id}/confirm-ready": {
+            "post": {
+                "tags": [
+                    "Sirkulasi"
+                ],
+                "summary": "Set READY_FOR_PICKUP & hitung H+3 kerja",
+                "description": "Petugas mengonfirmasi bahwa fisik buku ada di tangan. Status diubah ke READY_FOR_PICKUP dan tenggat H+3 kerja mulai dihitung.",
+                "operationId": "confirmReservationReady",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID Transaksi Peminjaman / Kode Reservasi",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Fisik buku dikonfirmasi ready for pickup",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Reservasi #LON-20261005-0001 berhasil diverifikasi! Physical book ready for pickup."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/circulation/reservations/{id}/mark-unavailable": {
+            "post": {
+                "tags": [
+                    "Sirkulasi"
+                ],
+                "summary": "Set UNAVAILABLE if lost/misplaced",
+                "description": "Petugas menandai buku tidak ditemukan di rak (salah taruh/hilang). Reservasi dibatalkan dan stok available_copies dikembalikan (+1).",
+                "operationId": "markReservationUnavailable",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID Transaksi Peminjaman / Kode Reservasi",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": false,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "reason": {
+                                        "type": "string",
+                                        "example": "Buku salah taruh di rak koleksi umum"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Reservasi ditandai UNAVAILABLE dan stok dikembalikan",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Reservasi #LON-20261005-0001 ditandai UNAVAILABLE. Stok telah dikembalikan."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/guestbooks/member": {
+            "post": {
+                "tags": [
+                    "Buku Tamu"
+                ],
+                "summary": "Scan barcode member untuk Kunjungan Anggota",
+                "description": "Mencatat kehadiran pengunjung anggota perpustakaan cukup dengan memindai barcode nomor anggota.",
+                "operationId": "storeMemberGuestbook",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "member_no"
+                                ],
+                                "properties": {
+                                    "member_no": {
+                                        "description": "Barcode/No Anggota",
+                                        "type": "string",
+                                        "example": "MEM-202610-0001"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Kunjungan anggota berhasil dicatat",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Kunjungan anggota 'Angga Prabaswara' berhasil dicatat."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Member tidak ditemukan",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": false
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Member dengan nomor 'MEM-999' tidak ditemukan."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/guestbooks/non-member": {
+            "post": {
+                "tags": [
+                    "Buku Tamu"
+                ],
+                "summary": "Form kunjungan pengunjung umum (Non-Anggota)",
+                "description": "Mencatat data identitas pengunjung umum non-anggota.",
+                "operationId": "storeNonMemberGuestbook",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "visitor_name"
+                                ],
+                                "properties": {
+                                    "visitor_name": {
+                                        "type": "string",
+                                        "example": "Budi Santoso"
+                                    },
+                                    "phone_number": {
+                                        "type": "string",
+                                        "example": "081234567890"
+                                    },
+                                    "institution_name": {
+                                        "type": "string",
+                                        "example": "Masyarakat Umum"
+                                    },
+                                    "address": {
+                                        "type": "string",
+                                        "example": "Singaraja, Buleleng"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Kunjungan non-anggota berhasil dicatat",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Kunjungan non-anggota 'Budi Santoso' berhasil dicatat."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/guestbooks/group": {
+            "post": {
+                "tags": [
+                    "Buku Tamu"
+                ],
+                "summary": "Form kunjungan rombongan (termasuk breakdown JSON job & education)",
+                "description": "Mencatat kunjungan rombongan dari sekolah/instansi beserta rincian demografi jumlah laki-laki, perempuan, pekerjaan, dan pendidikan.",
+                "operationId": "storeGroupGuestbook",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "institution_name",
+                                    "visitor_name",
+                                    "total_personnel"
+                                ],
+                                "properties": {
+                                    "institution_name": {
+                                        "type": "string",
+                                        "example": "SMA Negeri 1 Singaraja"
+                                    },
+                                    "visitor_name": {
+                                        "type": "string",
+                                        "example": "Drs. Putu Wijaya (PJ Rombongan)"
+                                    },
+                                    "total_personnel": {
+                                        "type": "integer",
+                                        "example": 40
+                                    },
+                                    "gender_male_count": {
+                                        "type": "integer",
+                                        "example": 20
+                                    },
+                                    "gender_female_count": {
+                                        "type": "integer",
+                                        "example": 20
+                                    },
+                                    "job_breakdown": {
+                                        "type": "object",
+                                        "example": {
+                                            "PELAJAR": 38,
+                                            "GURU": 2
+                                        }
+                                    },
+                                    "education_breakdown": {
+                                        "type": "object",
+                                        "example": {
+                                            "SMA": 38,
+                                            "S1": 2
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Kunjungan rombongan berhasil dicatat",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Kunjungan rombongan 'SMA Negeri 1 Singaraja' berhasil dicatat."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/guestbooks/reports": {
+            "get": {
+                "tags": [
+                    "Buku Tamu"
+                ],
+                "summary": "Rekap & Laporan Kunjungan Buku Tamu",
+                "description": "Menampilkan rekapitulasi data kunjungan buku tamu harian dan log detail.",
+                "operationId": "getGuestbookReports",
+                "parameters": [
+                    {
+                        "name": "start_date",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "end_date",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "visit_type",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Laporan buku tamu berhasil diambil",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Laporan dan rekapitulasi buku tamu berhasil diambil."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/lockers/borrow": {
+            "post": {
+                "tags": [
+                    "Loker"
+                ],
+                "summary": "Peminjaman loker (Validation 1 active loan per member)",
+                "description": "Pencatatan transaksi peminjaman kunci loker. Memastikan member belum memiliki transaksi loker aktif.",
+                "operationId": "borrowLockerKey",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "member_no",
+                                    "locker_code"
+                                ],
+                                "properties": {
+                                    "member_no": {
+                                        "description": "Hasil scan barcode kartu member",
+                                        "type": "string",
+                                        "example": "MEM-202610-0001"
+                                    },
+                                    "locker_code": {
+                                        "description": "Hasil scan barcode kunci loker",
+                                        "type": "string",
+                                        "example": "LCK-01"
+                                    },
+                                    "deposit_type": {
+                                        "description": "Jenis jaminan (KTP/KTM/SIM/dll)",
+                                        "type": "string",
+                                        "example": "KTP"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Peminjaman loker berhasil dicatat",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Peminjaman kunci loker LCK-01 berhasil dicatat!"
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validasi gagal / Member memiliki pinjaman loker aktif",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": false
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Anggota sedang memiliki peminjaman loker aktif."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/lockers/return": {
+            "post": {
+                "tags": [
+                    "Loker"
+                ],
+                "summary": "Pengembalian loker",
+                "description": "Petugas memproses pengembalian kunci loker berdasarkan barcode loker atau nomor member.",
+                "operationId": "returnLockerKey",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "locker_code": {
+                                        "type": "string",
+                                        "example": "LCK-01"
+                                    },
+                                    "member_no": {
+                                        "type": "string",
+                                        "example": "MEM-202610-0001"
+                                    },
+                                    "violation_note": {
+                                        "type": "string",
+                                        "example": "Kunci agak bengkok / Tidak ada pelanggaran"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Pengembalian loker berhasil diproses",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Pengembalian kunci loker LCK-01 berhasil diproses."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/lockers/status": {
+            "get": {
+                "tags": [
+                    "Loker"
+                ],
+                "summary": "Monitoring status loker",
+                "description": "Menampilkan seluruh status dan riwayat transaksi peminjaman loker.",
+                "operationId": "getLockerStatusAndHistory",
+                "parameters": [
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "description": "Filter status (BORROWED, RETURNED)",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "search",
+                        "in": "query",
+                        "description": "Pencarian kode loker, no transaksi, atau nama member",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Daftar riwayat peminjaman loker berhasil diambil",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Daftar riwayat peminjaman loker berhasil diambil."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/onsite-readings/member": {
+            "post": {
+                "tags": [
+                    "Baca di Tempat"
+                ],
+                "summary": "Scan barcode member & buku untuk Baca di Tempat",
+                "description": "Mencatat aktivitas baca di tempat untuk anggota berdasarkan scan barcode member dan barcode eksemplar buku.",
+                "operationId": "storeMemberOnsiteReading",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "member_no",
+                                    "collection_code"
+                                ],
+                                "properties": {
+                                    "member_no": {
+                                        "type": "string",
+                                        "example": "MEM-202610-0001"
+                                    },
+                                    "collection_code": {
+                                        "type": "string",
+                                        "example": "COL-1001"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Aktivitas baca di tempat anggota berhasil dicatat",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Aktivitas baca di tempat untuk anggota 'Angga Prabaswara' berhasil dicatat."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/onsite-readings/guest": {
+            "post": {
+                "tags": [
+                    "Baca di Tempat"
+                ],
+                "summary": "Entry baca di tempat pengunjung non-anggota (Guestbook)",
+                "description": "Mencatat aktivitas baca di tempat untuk pengunjung non-anggota yang telah mengisi buku tamu (guestbook_id).",
+                "operationId": "storeGuestOnsiteReading",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "guestbook_id",
+                                    "collection_code"
+                                ],
+                                "properties": {
+                                    "guestbook_id": {
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "collection_code": {
+                                        "type": "string",
+                                        "example": "COL-1001"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Aktivitas baca di tempat non-anggota berhasil dicatat",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Aktivitas baca di tempat untuk pengunjung 'Budi' berhasil dicatat."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/onsite-readings/reports": {
+            "get": {
+                "tags": [
+                    "Baca di Tempat"
+                ],
+                "summary": "Rekap & Statistik Baca di Tempat",
+                "description": "Menampilkan rekapitulasi data dan Top Buku yang paling sering dibaca di tempat.",
+                "operationId": "getOnsiteReadingReports",
+                "parameters": [
+                    {
+                        "name": "start_date",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "end_date",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Laporan baca di tempat berhasil diambil",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Laporan dan statistik baca di tempat berhasil diambil."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/books": {
+            "get": {
+                "tags": [
+                    "Public Catalog"
+                ],
+                "summary": "List katalog buku & pagination",
+                "description": "Menampilkan katalog publik seluruh koleksi buku beserta pencarian dan paginasi.",
+                "operationId": "getPublicBooks",
+                "parameters": [
+                    {
+                        "name": "search",
+                        "in": "query",
+                        "description": "Kata kunci pencarian judul, pengarang, penerbit, atau ISBN",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "description": "Halaman paginasi",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "default": 1
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Katalog publik buku berhasil diambil",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Katalog publik buku berhasil diambil."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/books/{id}": {
+            "get": {
+                "tags": [
+                    "Public Catalog"
+                ],
+                "summary": "Detail buku & stok available_copies",
+                "description": "Menampilkan rincian detail metadata buku beserta sisa ketersediaan stok (available_copies).",
+                "operationId": "getPublicBookById",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID Katalog Buku",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Detail buku berhasil diambil",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Detail buku berhasil diambil."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Buku tidak ditemukan",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": false
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Buku dengan ID 999 tidak ditemukan."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/circulation/reserve": {
+            "post": {
+                "tags": [
+                    "Sirkulasi"
+                ],
+                "summary": "Reservasi online (Return status PENDING_CHECK)",
+                "description": "Member yang terautentikasi melakukan reservasi online. Status awal transaksi diset ke PENDING_CHECK dan stok berkurang (-1).",
+                "operationId": "reserveBookOnlineApi",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "ID Katalog Buku",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Reservasi berhasil dibuat dengan status PENDING_CHECK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Reservasi berhasil dibuat! Kode Reservasi Anda: RSV-20261005-0001."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthenticated",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": false
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Unauthenticated. Silakan login sebagai member terlebih dahulu."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validasi gagal / stok kosong / kuota penuh",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": false
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Batas maksimal peminjaman dan reservasi aktif adalah 3 buku."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        }
+    },
+    "components": {
+        "securitySchemes": {
+            "bearerAuth": {
+                "type": "http",
+                "description": "Masukkan Token Bearer autentikasi Sanctum / JWT",
+                "bearerFormat": "JWT",
+                "scheme": "bearer"
+            }
+        }
+    },
+    "tags": [
+        {
+            "name": "Laporan Executif",
+            "description": "API Engine Laporan Eksekutif Perpustakaan (Sirkulasi, Member, Katalog, Baca di Tempat, Buku Tamu) dengan ekspor PDF & Excel"
+        },
+        {
+            "name": "Sirkulasi",
+            "description": "API Transaksi Sirkulasi (Peminjaman, Pengembalian, Reservasi, Perpanjangan & Denda)"
+        },
+        {
+            "name": "Buku Tamu",
+            "description": "API Pencatatan Kunjungan Buku Tamu (Member, Non-Member & Rombongan)"
+        },
+        {
+            "name": "Loker",
+            "description": "API Modul Peminjaman & Pengembalian Kunci Loker Perpustakaan"
+        },
+        {
+            "name": "Baca di Tempat",
+            "description": "API Pencatatan Aktivitas Baca di Tempat (Onsite Reading)"
+        },
+        {
+            "name": "Public Catalog",
+            "description": "API Katalog Publik Buku (Dapat diakses secara bebas tanpa login)"
+        }
+    ]
+}

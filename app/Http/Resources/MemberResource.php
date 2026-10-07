@@ -11,7 +11,12 @@ class MemberResource extends JsonResource
     {
         $photo = $this->photo_path ?: $this->avatar;
         if ($photo && !str_starts_with($photo, 'http://') && !str_starts_with($photo, 'https://')) {
-            $photo = url($photo);
+            $cleaned = ltrim($photo, '/');
+            if (str_starts_with($cleaned, 'storage/')) {
+                $photo = asset($cleaned);
+            } else {
+                $photo = asset('storage/' . $cleaned);
+            }
         }
 
         return [
@@ -24,6 +29,7 @@ class MemberResource extends JsonResource
             'institution'         => $this->institution_name,
             'institution_name'    => $this->institution_name,
             'photo_path'          => $photo,
+            'photo_url'           => $photo,
             'avatar'              => $this->avatar,
             'place_of_birth'      => $this->place_of_birth,
             'date_of_birth'       => $this->date_of_birth ? (is_string($this->date_of_birth) ? $this->date_of_birth : $this->date_of_birth->format('Y-m-d')) : null,

@@ -209,3 +209,16 @@ Route::prefix('v1')->group(function () {
         });
     });
 });
+
+// Endpoint publik penyaji berkas storage dengan CORS header untuk ekspor Canvas/KTA
+Route::get('/storage/{path}', function ($path) {
+    $filePath = storage_path('app/public/' . $path);
+    if (!file_exists($filePath)) {
+        abort(404);
+    }
+    return response()->file($filePath, [
+        'Access-Control-Allow-Origin' => '*',
+        'Access-Control-Allow-Methods' => 'GET, OPTIONS',
+    ]);
+})->where('path', '.*');
+

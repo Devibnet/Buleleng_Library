@@ -63,8 +63,8 @@ class ProfileController extends Controller
             'photo_url'           => $photoUrl,
             'google_id'           => $member->google_id,
             'avatar'              => $member->avatar,
-            'created_at'          => $member->created_at,
-            'updated_at'          => $member->updated_at,
+            'created_at'          => $member->created_at ? $member->created_at->toIso8601String() : null,
+            'updated_at'          => $member->updated_at ? $member->updated_at->toIso8601String() : null,
         ];
     }
 
@@ -195,7 +195,16 @@ class ProfileController extends Controller
             'institution_name'    => ['nullable', 'string', 'max:255'],
             'phone_number'        => ['nullable', 'string', 'max:30'],
             'email'               => ['required', 'email', 'max:255', Rule::unique('members', 'email')->ignore($member->id)],
+            'photo'               => ['nullable', 'image', 'mimes:jpeg,png,jpg,webp', 'max:2048'],
         ]);
+
+        if ($request->hasFile('photo')) {
+            if ($member->photo_path && Storage::disk('public')->exists($member->photo_path)) {
+                Storage::disk('public')->delete($member->photo_path);
+            }
+            $validated['photo_path'] = $request->file('photo')->store('profile-photos', 'public');
+            unset($validated['photo']);
+        }
 
         $member->update($validated);
 

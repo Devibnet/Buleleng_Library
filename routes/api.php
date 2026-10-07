@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\MemberLoanReservationController;
 use App\Http\Controllers\Api\OnsiteReadingController;
 use App\Http\Controllers\Api\V1\Admin\BookManagementController;
 use App\Http\Controllers\Api\V1\ProfileController;
+use App\Http\Controllers\Auth\MemberRegisterController;
 use App\Http\Controllers\BookController;
 use App\Http\Controllers\ReservationController;
 use Illuminate\Support\Facades\Route;
@@ -24,6 +25,13 @@ use Illuminate\Support\Facades\Route;
 Route::get('/books', [BookController::class, 'index']);
 Route::get('/books/{id}', [BookController::class, 'show']);
 Route::post('/books/{id}/reserve', [ReservationController::class, 'reserve']);
+
+// Auth Endpoints (Bisa diakses di root /api/auth/login dan /api/auth/member/login)
+Route::post('/auth/login', [AuthController::class, 'loginMember']);
+Route::post('/auth/member/login', [AuthController::class, 'loginMember']);
+Route::post('/auth/register', [MemberRegisterController::class, 'registerApi']);
+Route::post('/auth/member/register', [MemberRegisterController::class, 'registerApi']);
+Route::post('/member/register', [MemberRegisterController::class, 'registerApi']);
 
 // Public Guestbook Endpoints (Bisa diakses tanpa login di root /api/guestbooks)
 Route::prefix('guestbooks')->group(function () {
@@ -80,6 +88,7 @@ Route::prefix('v1')->group(function () {
 
     // 4. Auth Endpoints
     Route::post('/auth/member/login', [AuthController::class, 'loginMember']);
+    Route::post('/auth/member/register', [MemberRegisterController::class, 'registerApi']);
     Route::post('/auth/admin/login', [AuthController::class, 'loginAdmin']);
 
     // 5. Member Protected Area (Guard: member)
@@ -91,7 +100,7 @@ Route::prefix('v1')->group(function () {
     // 5b. Profile Management Endpoints (Guard: auth:sanctum)
     Route::middleware('auth:sanctum')->prefix('profile')->group(function () {
         Route::get('/', [ProfileController::class, 'show']);
-        Route::put('/', [ProfileController::class, 'update']);
+        Route::match(['put', 'post'], '/', [ProfileController::class, 'update']);
         Route::post('/photo', [ProfileController::class, 'updatePhoto']);
         Route::put('/password', [ProfileController::class, 'updatePassword']);
     });

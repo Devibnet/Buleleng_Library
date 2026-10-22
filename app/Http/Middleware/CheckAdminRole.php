@@ -17,12 +17,12 @@ class CheckAdminRole
      */
     public function handle(Request $request, Closure $next, ...$roles): Response
     {
-        $admin = Auth::guard('admin')->user();
+        $admin = Auth::guard('admin')->user() ?? Auth::guard('sanctum')->user() ?? $request->user();
 
         $isApiRequest = $request->is('api/*') || $request->expectsJson();
 
         // 1. Cek Autentikasi Admin
-        if (! $admin) {
+        if (! $admin || ! ($admin instanceof \App\Models\Admin)) {
             if ($isApiRequest) {
                 return response()->json([
                     'success' => false,
@@ -35,7 +35,9 @@ class CheckAdminRole
 
         // 2. Cek status is_active: jika false, batalkan akses, logout, dan tampilkan pesan "Akun Anda tidak aktif"
         if (! $admin->is_active) {
-            Auth::guard('admin')->logout();
+            if (Auth::guard('admin')->check()) {
+                Auth::guard('admin')->logout();
+            }
 
             if ($request->hasSession()) {
                 $request->session()->invalidate();

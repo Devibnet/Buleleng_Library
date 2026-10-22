@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\LockerController;
 use App\Http\Controllers\Api\MemberLoanReservationController;
 use App\Http\Controllers\Api\OnsiteReadingController;
 use App\Http\Controllers\Api\V1\Admin\BookManagementController;
+use App\Http\Controllers\Api\V1\Admin\DashboardController;
 use App\Http\Controllers\Api\V1\ProfileController;
 use App\Http\Controllers\Auth\MemberRegisterController;
 use App\Http\Controllers\BookController;
@@ -29,6 +30,7 @@ Route::post('/books/{id}/reserve', [ReservationController::class, 'reserve']);
 // Auth Endpoints (Bisa diakses di root /api/auth/login dan /api/auth/member/login)
 Route::post('/auth/login', [AuthController::class, 'loginMember']);
 Route::post('/auth/member/login', [AuthController::class, 'loginMember']);
+Route::post('/auth/admin/login', [AuthController::class, 'loginAdmin']);
 Route::post('/auth/register', [MemberRegisterController::class, 'registerApi']);
 Route::post('/auth/member/register', [MemberRegisterController::class, 'registerApi']);
 Route::post('/member/register', [MemberRegisterController::class, 'registerApi']);
@@ -60,6 +62,13 @@ Route::middleware(['auth:admin', 'admin.role:operator,admin,super_admin'])->pref
     Route::get('/pending', [CirculationController::class, 'pendingReservations']);
     Route::post('/{id}/confirm-ready', [CirculationController::class, 'confirmReady']);
     Route::post('/{id}/mark-unavailable', [CirculationController::class, 'markUnavailable']);
+});
+
+// Admin Dashboard Endpoints (Root alias)
+Route::middleware(['auth:sanctum', 'admin.role:operator,admin,super_admin'])->prefix('admin/dashboard')->group(function () {
+    Route::get('/', [DashboardController::class, 'index']);
+    Route::post('/scan', [DashboardController::class, 'scan']);
+    Route::post('/sync', [DashboardController::class, 'sync']);
 });
 
 Route::prefix('v1')->group(function () {
@@ -108,9 +117,15 @@ Route::prefix('v1')->group(function () {
     // 6. Admin Protected Area with RBAC Guard & Role Middleware
     Route::prefix('admin')->group(function () {
 
-        // Modul Manajemen Buku (CRUD & Import Excel)
+        // Modul Manajemen Buku & Dashboard Admin (CRUD, Rekap Database & Import Excel)
         Route::middleware(['auth:sanctum', 'admin.role:operator,admin,super_admin'])->group(function () {
+            // Dashboard Admin Otomasi & Statistik
+            Route::get('/dashboard', [DashboardController::class, 'index']);
+            Route::post('/dashboard/scan', [DashboardController::class, 'scan']);
+            Route::post('/dashboard/sync', [DashboardController::class, 'sync']);
+
             Route::get('/books', [BookManagementController::class, 'index']);
+            Route::get('/collections', [BookManagementController::class, 'listCollections']);
             Route::post('/books/import', [BookManagementController::class, 'importExcel']);
             Route::get('/books/{id}', [BookManagementController::class, 'show']);
             Route::post('/books', [BookManagementController::class, 'store']);
@@ -143,7 +158,7 @@ Route::prefix('v1')->group(function () {
             });
 
             Route::get('/collections', function () {
-                $collections = \App\Models\Collection::with('catalog')->all();
+                $collections = \App\Models\Collection::with('catalog')->get();
                 return response()->json([
                     'success' => true,
                     'message' => 'Data master koleksi berhasil diambil.',
@@ -193,7 +208,7 @@ Route::prefix('v1')->group(function () {
         });
 
         // Group 'reports': Modul Laporan Eksekutif (Report Engine)
-        Route::middleware(['auth:admin', 'admin.role:operator,admin,super_admin'])->prefix('reports')->group(function () {
+        Route::middleware(['auth:sanctum', 'admin.role:operator,admin,super_admin'])->prefix('reports')->group(function () {
             Route::get('/circulation', [ReportController::class, 'circulation']);
             Route::get('/members', [ReportController::class, 'members']);
             Route::get('/catalogs', [ReportController::class, 'catalogs']);

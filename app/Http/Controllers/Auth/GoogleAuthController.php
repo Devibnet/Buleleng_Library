@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Member;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use Laravel\Socialite\Facades\Socialite;
 use Throwable;
 
@@ -16,7 +18,10 @@ class GoogleAuthController extends Controller
      */
     public function redirectToGoogle(): RedirectResponse|\Symfony\Component\HttpFoundation\RedirectResponse
     {
-        return Socialite::driver('google')->redirect();
+        return Socialite::driver('google')
+            ->stateless()
+            ->with(['prompt' => 'select_account'])
+            ->redirect();
     }
 
     /**
@@ -24,12 +29,26 @@ class GoogleAuthController extends Controller
      */
     public function handleGoogleCallback(): RedirectResponse
     {
+        $frontendUrl = env('FRONTEND_URL', 'http://localhost:5173');
+
+        if (request()->has('error')) {
+            $error = request('error');
+            return redirect("{$frontendUrl}/login?error=" . urlencode("Autentikasi Google dibatalkan atau ditolak ({$error})."));
+        }
+
         try {
             /** @var \Laravel\Socialite\Two\User $googleUser */
-            $googleUser = Socialite::driver('google')->user();
+            try {
+                $googleUser = Socialite::driver('google')->stateless()->user();
+            } catch (Throwable $statelessErr) {
+                $googleUser = Socialite::driver('google')->user();
+            }
         } catch (Throwable $e) {
-            return redirect('/')
-                ->with('error', 'Gagal melakukan autentikasi dengan Google: ' . $e->getMessage());
+            \Illuminate\Support\Facades\Log::error('Google OAuth Callback Error: ' . $e->getMessage(), [
+                'exception' => $e,
+            ]);
+            $errorMsg = $e->getMessage() ?: class_basename($e);
+            return redirect("{$frontendUrl}/login?error=" . urlencode('Gagal melakukan autentikasi dengan Google: ' . $errorMsg));
         }
 
         // Cari record di tabel members berdasarkan google_id atau email
@@ -37,8 +56,22 @@ class GoogleAuthController extends Controller
             ->orWhere('email', $googleUser->getEmail())
             ->first();
 
-        if ($member) {
-            // Jika member sudah ada: update google_id dan photo_path jika sebelumnya masih kosong
+        $isNewMember = false;
+
+        if (! $member) {
+            $isNewMember = true;
+            // Buat member baru di database dari akun Google
+            $member = Member::create([
+                'member_no'   => Member::generateMemberNo(),
+                'name'        => $googleUser->getName() ?? $googleUser->getNickname() ?? 'Pengguna Google',
+                'email'       => $googleUser->getEmail(),
+                'google_id'   => $googleUser->getId(),
+                'avatar'      => $googleUser->getAvatar(),
+                'photo_path'  => $googleUser->getAvatar(),
+                'password'    => Hash::make(Str::random(24)),
+            ]);
+        } else {
+            // Update data google jika sebelumnya masih kosong
             $needsUpdate = false;
 
             if (empty($member->google_id)) {
@@ -59,31 +92,34 @@ class GoogleAuthController extends Controller
             if ($needsUpdate) {
                 $member->save();
             }
-
-            // Autentikasi / Login pengguna menggunakan guard member
-            Auth::guard('member')->login($member);
-
-            // Cek apakah ada intent reservasi tertunda pasca login
-            $intendedBookId = session('intended_book_id');
-            if ($intendedBookId) {
-                session()->forget('intended_book_id');
-                return redirect("/books/{$intendedBookId}")
-                    ->with('info', 'Anda telah berhasil login. Silakan lanjutkan reservasi buku.');
-            }
-
-            return redirect()->intended('/member/dashboard');
         }
 
-        // Jika member baru: simpan data temporer Google ke Session -> Redirect ke /member/register/complete
-        session([
-            'google_user' => [
-                'google_id'  => $googleUser->getId(),
-                'name'       => $googleUser->getName() ?? $googleUser->getNickname() ?? '',
-                'email'      => $googleUser->getEmail(),
-                'photo_path' => $googleUser->getAvatar(),
-            ],
+        // Login menggunakan guard member
+        Auth::guard('member')->login($member);
+
+        // Buat token autentikasi Sanctum untuk SPA
+        $token = $member->createToken('google-auth-token')->plainTextToken;
+
+        // Cek kelengkapan data diri:
+        // Member baru belum melengkapi data diri.
+        // Member yang sudah ada dinyatakan lengkap jika telah mengisi nomor handphone dan (alamat KTP/domisili atau kategori pekerjaan).
+        $hasCompletedData = ! $isNewMember
+            && ! empty($member->phone_number)
+            && (! empty($member->ktp_address) || ! empty($member->residential_address) || ! empty($member->job_category));
+
+        $userData = json_encode([
+            'id'                 => $member->id,
+            'name'               => $member->name,
+            'email'              => $member->email,
+            'member_no'          => $member->member_no,
+            'avatar'             => $member->avatar ?? $member->photo_path,
+            'phone_number'       => $member->phone_number,
+            'job_category'       => $member->job_category,
+            'has_completed_data' => $hasCompletedData,
         ]);
 
-        return redirect()->route('member.register.complete');
+        $targetPath = $hasCompletedData ? '/' : '/form-data-diri';
+
+        return redirect("{$frontendUrl}{$targetPath}?token=" . urlencode($token) . "&user=" . urlencode($userData));
     }
 }

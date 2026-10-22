@@ -34,6 +34,8 @@ class AuthController extends Controller
 
         Auth::guard('member')->login($member);
 
+        $token = $member->createToken('member-auth-token')->plainTextToken;
+
         $intendedBookId = session('intended_book_id');
         session()->forget('intended_book_id');
 
@@ -41,7 +43,9 @@ class AuthController extends Controller
             'success'          => true,
             'message'          => 'Login member berhasil.',
             'intended_book_id' => $intendedBookId,
+            'token'            => $token,
             'data'             => [
+                'token'  => $token,
                 'member' => new MemberResource($member),
             ],
         ], 200);
@@ -57,12 +61,14 @@ class AuthController extends Controller
             'password' => 'required|string',
         ]);
 
-        $admin = Admin::where('username', $request->username)->first();
+        $admin = Admin::where('username', $request->username)
+            ->orWhere('email', $request->username)
+            ->first();
 
         if (! $admin || ! Hash::check($request->password, $admin->password)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Kredensial username atau password admin salah.',
+                'message' => 'Kredensial username/email atau password admin salah.',
             ], 401);
         }
 
@@ -75,10 +81,14 @@ class AuthController extends Controller
 
         Auth::guard('admin')->login($admin);
 
+        $token = $admin->createToken('admin-auth-token')->plainTextToken;
+
         return response()->json([
             'success' => true,
             'message' => 'Login admin berhasil.',
+            'token'   => $token,
             'data'    => [
+                'token' => $token,
                 'admin' => [
                     'id'        => $admin->id,
                     'username'  => $admin->username,

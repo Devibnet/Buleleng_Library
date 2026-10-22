@@ -124,7 +124,22 @@ class BookManagementController extends Controller
      */
     public function show(int $id): JsonResponse
     {
-        $catalog = Catalog::with('collections')->findOrFail($id);
+        $catalog = Catalog::with('collections')->find($id);
+
+        // Fallback: Jika ID yang dikirimkan adalah ID Eksemplar (Collection), cari data katalog induknya
+        if (! $catalog) {
+            $collection = Collection::find($id);
+            if ($collection && $collection->catalog_id) {
+                $catalog = Catalog::with('collections')->find($collection->catalog_id);
+            }
+        }
+
+        if (! $catalog) {
+            return response()->json([
+                'success' => false,
+                'message' => "Katalog buku #{$id} tidak ditemukan.",
+            ], 404);
+        }
 
         return response()->json([
             'success' => true,
@@ -214,10 +229,22 @@ class BookManagementController extends Controller
             }
 
             // Buat 1 eksemplar fisik di tabel collections
+            if (empty($validated['barcode_no'])) {
+                $baseBarcode = 'BC-' . date('Ymd') . '-' . str_pad((string) $catalog->id, 4, '0', STR_PAD_LEFT);
+                $barcode = $baseBarcode;
+                $counter = 1;
+                while (Collection::where('barcode_no', $barcode)->exists()) {
+                    $barcode = $baseBarcode . '-' . $counter;
+                    $counter++;
+                }
+            } else {
+                $barcode = $validated['barcode_no'];
+            }
+
             $collection = Collection::create([
                 'catalog_id'            => $catalog->id,
-                'item_number'           => $validated['item_number'] ?? null,
-                'barcode_no'            => $validated['barcode_no'],
+                'item_number'           => $validated['item_number'] ?? ('ITM-' . $catalog->id),
+                'barcode_no'            => $barcode,
                 'rfid_no'               => $validated['rfid_no'] ?? null,
                 'exemplar_call_number'  => $validated['exemplar_call_number'] ?? $catalog->catalog_call_number,
                 'procurement_date'      => $validated['procurement_date'] ?? now(),
@@ -473,7 +500,10 @@ class BookManagementController extends Controller
     public function importExcel(Request $request): JsonResponse
     {
         $request->validate([
-            'file' => ['required', 'file', 'mimes:xlsx,xls,csv', 'max:10240'],
+            'file' => ['required', 'file', 'mimes:xlsx,xls,csv,txt', 'extensions:xlsx,xls,csv', 'max:10240'],
+        ], [
+            'file.mimes' => 'File harus berformat xlsx, xls, atau csv.',
+            'file.extensions' => 'File harus berformat xlsx, xls, atau csv.',
         ]);
 
         try {
@@ -491,5 +521,94 @@ class BookManagementController extends Controller
                 'message' => 'Gagal memproses file Excel: ' . $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * Menampilkan daftar seluruh eksemplar fisik buku beserta relasi katalog, pencarian, dan metrik ringkasan.
+     */
+    public function listCollections(Request $request): JsonResponse
+    {
+        $query = Collection::with('catalog');
+
+        // Search filter (across barcode, item_number, rfid_no, and catalog title, author, isbn)
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('barcode_no', 'like', "%{$search}%")
+                    ->orWhere('item_number', 'like', "%{$search}%")
+                    ->orWhere('rfid_no', 'like', "%{$search}%")
+                    ->orWhere('exemplar_call_number', 'like', "%{$search}%")
+                    ->orWhereHas('catalog', function ($cq) use ($search) {
+                        $cq->where('title', 'like', "%{$search}%")
+                            ->orWhere('subtitle', 'like', "%{$search}%")
+                            ->orWhere('author_main', 'like', "%{$search}%")
+                            ->orWhere('publisher', 'like', "%{$search}%")
+                            ->orWhere('isbn', 'like', "%{$search}%");
+                    });
+            });
+        }
+
+        // Filter availability status
+        if ($request->filled('status') && $request->status !== 'all' && $request->status !== 'Semua Status Eksemplar') {
+            $status = $request->status;
+            if ($status === 'TERSEDIA' || $status === 'AVAILABLE' || $status === 'Tersedia di Rak') {
+                $query->where('availability_status', 'AVAILABLE')->where('is_quarantine', false);
+            } elseif ($status === 'DIPINJAM' || $status === 'BORROWED' || $status === 'Sedang Dipinjam') {
+                $query->where('availability_status', 'BORROWED');
+            } elseif ($status === 'BINDING' || $status === 'MAINTENANCE' || $status === 'Proses Binding') {
+                $query->where('availability_status', 'MAINTENANCE');
+            } elseif ($status === 'KARANTINA' || $status === 'QUARANTINED' || $status === 'Karantina') {
+                $query->where(function ($q) {
+                    $q->where('is_quarantine', true)->orWhere('availability_status', 'QUARANTINED');
+                });
+            } else {
+                $query->where('availability_status', $status);
+            }
+        }
+
+        // Filter material type
+        if ($request->filled('material_type') && $request->material_type !== 'all' && $request->material_type !== 'Semua Jenis Bahan') {
+            $materialType = $request->material_type;
+            $query->whereHas('catalog', function ($cq) use ($materialType) {
+                $cq->where('material_type', 'like', "%{$materialType}%");
+            });
+        }
+
+        // Filter room location
+        if ($request->filled('room_location') && $request->room_location !== 'all' && $request->room_location !== 'Semua Lokasi Penyimpanan') {
+            $query->where('room_location_code', 'like', "%{$request->room_location}%");
+        }
+
+        // Filter year
+        if ($request->filled('year')) {
+            $year = $request->year;
+            $query->where(function ($q) use ($year) {
+                $q->whereYear('procurement_date', $year)
+                  ->orWhereHas('catalog', function ($cq) use ($year) {
+                      $cq->where('publish_year', $year);
+                  });
+            });
+        }
+
+        $perPage = (int) $request->input('per_page', 10);
+        $collections = $query->orderBy('id', 'desc')->paginate($perPage);
+
+        // Calculate summary metrics
+        $metrics = [
+            'total_exemplars'   => Collection::count(),
+            'total_titles'      => Catalog::count(),
+            'available_count'   => Collection::where('availability_status', 'AVAILABLE')->where('is_quarantine', false)->count(),
+            'borrowed_count'    => Collection::where('availability_status', 'BORROWED')->count(),
+            'maintenance_count' => Collection::where('availability_status', 'MAINTENANCE')->count(),
+            'quarantine_count'  => Collection::where('is_quarantine', true)->orWhere('availability_status', 'QUARANTINED')->count(),
+            'month_new_count'   => Collection::whereMonth('created_at', now()->month)->whereYear('created_at', now()->year)->count(),
+        ];
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Daftar koleksi eksemplar berhasil diambil.',
+            'data'    => \App\Http\Resources\CollectionResource::collection($collections)->response()->getData(true),
+            'metrics' => $metrics,
+        ], 200);
     }
 }

@@ -59,7 +59,7 @@ class StoreBookRequest extends FormRequest
             'is_quarantine'               => ['nullable', 'boolean'],
 
             // Metadata Collection (Physical Exemplar)
-            'barcode_no'            => ['required', 'string', 'max:100', 'unique:collections,barcode_no'],
+            'barcode_no'            => ['nullable', 'string', 'max:100', 'unique:collections,barcode_no'],
             'item_number'           => ['nullable', 'string', 'max:100'],
             'rfid_no'               => ['nullable', 'string', 'max:100'],
             'exemplar_call_number'  => ['nullable', 'string', 'max:100'],

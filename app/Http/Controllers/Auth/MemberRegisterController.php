@@ -205,7 +205,9 @@ class MemberRegisterController extends Controller
             $emailRule[] = 'unique:members,email';
         }
 
-        $passwordRule = $isExistingGoogleOrUpdating ? ['nullable', 'string', 'min:6'] : ['required', 'string', 'min:6'];
+        $passwordRule = $isExistingGoogleOrUpdating
+            ? ['nullable', 'string', \Illuminate\Validation\Rules\Password::min(8)->numbers()->symbols()]
+            : ['required', 'string', \Illuminate\Validation\Rules\Password::min(8)->numbers()->symbols()];
 
         $validator = \Illuminate\Support\Facades\Validator::make($input, [
             'name'                => ['required', 'string', 'max:255'],
@@ -225,7 +227,8 @@ class MemberRegisterController extends Controller
             'email.email'           => 'Format email tidak valid.',
             'email.unique'          => 'Email ini sudah terdaftar sebagai anggota perpustakaan.',
             'password.required'     => 'Password wajib diisi.',
-            'password.min'          => 'Password minimal harus 6 karakter.',
+            'password.min'          => 'Password minimal harus 8 karakter.',
+            'password'              => 'Password minimal harus 8 karakter, mengandung setidaknya 1 angka dan 1 simbol.',
             'date_of_birth.date'    => 'Format tanggal lahir tidak valid.',
             'date_of_birth.before'  => 'Tanggal lahir harus sebelum hari ini.',
             'job_category.required' => 'Kategori pekerjaan wajib dipilih.',

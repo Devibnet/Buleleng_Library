@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\GuestbookController;
 use App\Http\Controllers\Api\LockerController;
 use App\Http\Controllers\Api\MemberLoanReservationController;
 use App\Http\Controllers\Api\OnsiteReadingController;
+use App\Http\Controllers\Api\V1\Admin\AdminProfileController;
 use App\Http\Controllers\Api\V1\Admin\BookManagementController;
 use App\Http\Controllers\Api\V1\Admin\DashboardController;
 use App\Http\Controllers\Api\V1\Admin\MemberManagementController;
@@ -72,6 +73,13 @@ Route::middleware(['auth:sanctum', 'admin.role:operator,admin,super_admin'])->pr
     Route::get('/', [DashboardController::class, 'index']);
     Route::post('/scan', [DashboardController::class, 'scan']);
     Route::post('/sync', [DashboardController::class, 'sync']);
+});
+
+// Admin Profile Endpoints (Root alias)
+Route::middleware(['auth:sanctum', 'admin.role:operator,admin,super_admin'])->prefix('admin/profile')->group(function () {
+    Route::get('/', [AdminProfileController::class, 'show']);
+    Route::put('/', [AdminProfileController::class, 'update']);
+    Route::put('/password', [AdminProfileController::class, 'updatePassword']);
 });
 
 Route::prefix('v1')->group(function () {
@@ -167,6 +175,13 @@ Route::prefix('v1')->group(function () {
             Route::post('/problem-carts/{id}/resolve', [ProblemCartController::class, 'resolve']);
             Route::delete('/problem-carts/{id}', [ProblemCartController::class, 'destroy']);
             Route::get('/members/{id}/problem-history', [ProblemCartController::class, 'memberHistory']);
+
+            // Admin Profile Management (v1)
+            Route::prefix('profile')->group(function () {
+                Route::get('/', [AdminProfileController::class, 'show']);
+                Route::put('/', [AdminProfileController::class, 'update']);
+                Route::put('/password', [AdminProfileController::class, 'updatePassword']);
+            });
         });
 
         // Group 'super_admin': Kelola data akun staf admin

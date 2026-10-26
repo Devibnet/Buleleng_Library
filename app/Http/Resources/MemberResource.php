@@ -9,15 +9,7 @@ class MemberResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
-        $photo = $this->photo_path ?: $this->avatar;
-        if ($photo && !str_starts_with($photo, 'http://') && !str_starts_with($photo, 'https://')) {
-            $cleaned = ltrim($photo, '/');
-            if (str_starts_with($cleaned, 'storage/')) {
-                $photo = asset($cleaned);
-            } else {
-                $photo = asset('storage/' . $cleaned);
-            }
-        }
+        $photo = $this->photo_url;
 
         return [
             'id'                  => $this->id,

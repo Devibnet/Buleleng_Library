@@ -41,6 +41,33 @@ class Member extends Authenticatable
         'remember_token',
     ];
 
+    protected $appends = [
+        'photo_url',
+    ];
+
+    /**
+     * Get the resolved, absolute public URL for the member's photo or avatar.
+     */
+    public function getPhotoUrlAttribute(): ?string
+    {
+        $photo = $this->photo_path ?: $this->avatar;
+        if (! $photo) {
+            return null;
+        }
+
+        if (str_starts_with($photo, 'http://') || str_starts_with($photo, 'https://')) {
+            return preg_replace('#/storage/+storage/#', '/storage/', $photo);
+        }
+
+        $cleaned = ltrim($photo, '/');
+        $cleaned = preg_replace('#^storage/+storage/#', 'storage/', $cleaned);
+        if (str_starts_with($cleaned, 'storage/')) {
+            return asset($cleaned);
+        }
+
+        return asset('storage/' . $cleaned);
+    }
+
     /**
      * Get the attributes that should be cast.
      *

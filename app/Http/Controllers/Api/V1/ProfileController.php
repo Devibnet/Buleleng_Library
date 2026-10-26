@@ -28,11 +28,11 @@ class ProfileController extends Controller
         /** @var Member|null $member */
         $member = $request->user();
 
-        if (! $member) {
-            $member = Auth::guard('sanctum')->user() ?? Auth::guard('member')->user();
+        if (! ($member instanceof Member)) {
+            $member = Auth::guard('member')->user() ?? Auth::guard('sanctum')->user();
         }
 
-        return $member;
+        return ($member instanceof Member) ? $member : null;
     }
 
     /**
@@ -40,12 +40,7 @@ class ProfileController extends Controller
      */
     protected function formatMemberData(Member $member): array
     {
-        $photoUrl = null;
-        if ($member->photo_path) {
-            $photoUrl = asset('storage/' . $member->photo_path);
-        } elseif ($member->avatar) {
-            $photoUrl = $member->avatar;
-        }
+        $photoUrl = $member->photo_url;
 
         return [
             'id'                  => $member->id,
@@ -54,12 +49,12 @@ class ProfileController extends Controller
             'residential_address' => $member->residential_address,
             'ktp_address'         => $member->ktp_address,
             'place_of_birth'      => $member->place_of_birth,
-            'date_of_birth'       => $member->date_of_birth ? $member->date_of_birth->format('Y-m-d') : null,
+            'date_of_birth'       => $member->date_of_birth ? (is_string($member->date_of_birth) ? $member->date_of_birth : $member->date_of_birth->format('Y-m-d')) : null,
             'job_category'        => $member->job_category,
             'institution_name'    => $member->institution_name,
             'phone_number'        => $member->phone_number,
             'email'               => $member->email,
-            'photo_path'          => $member->photo_path,
+            'photo_path'          => $photoUrl,
             'photo_url'           => $photoUrl,
             'google_id'           => $member->google_id,
             'avatar'              => $member->avatar,
@@ -199,8 +194,11 @@ class ProfileController extends Controller
         ]);
 
         if ($request->hasFile('photo')) {
-            if ($member->photo_path && Storage::disk('public')->exists($member->photo_path)) {
-                Storage::disk('public')->delete($member->photo_path);
+            if ($member->photo_path) {
+                $oldRel = ltrim(preg_replace('#^/?storage/#', '', $member->photo_path), '/');
+                if (Storage::disk('public')->exists($oldRel)) {
+                    Storage::disk('public')->delete($oldRel);
+                }
             }
             $validated['photo_path'] = $request->file('photo')->store('profile-photos', 'public');
             unset($validated['photo']);
@@ -276,8 +274,11 @@ class ProfileController extends Controller
 
         $file = $request->file($fileKey);
 
-        if ($member->photo_path && Storage::disk('public')->exists($member->photo_path)) {
-            Storage::disk('public')->delete($member->photo_path);
+        if ($member->photo_path) {
+            $oldRel = ltrim(preg_replace('#^/?storage/#', '', $member->photo_path), '/');
+            if (Storage::disk('public')->exists($oldRel)) {
+                Storage::disk('public')->delete($oldRel);
+            }
         }
 
         $newPhotoPath = $file->store('profile-photos', 'public');

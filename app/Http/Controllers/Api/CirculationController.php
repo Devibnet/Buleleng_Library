@@ -267,8 +267,11 @@ class CirculationController extends Controller
     public function returnLoan(Request $request): JsonResponse
     {
         $request->validate([
-            'member_no'    => 'required|string',
-            'book_barcode' => 'required|string',
+            'member_no'         => 'required|string',
+            'book_barcode'      => 'required|string',
+            'condition'         => 'nullable|string',
+            'quarantine_reason' => 'nullable|string',
+            'notes'             => 'nullable|string',
         ]);
 
         $operatorAdmin = Auth::guard('admin')->user();
@@ -277,7 +280,10 @@ class CirculationController extends Controller
             $updatedLoan = $this->circulationService->processReturn(
                 $request->input('member_no'),
                 $request->input('book_barcode'),
-                $operatorAdmin?->id
+                $operatorAdmin?->id,
+                $request->input('condition', 'Baik'),
+                $request->input('quarantine_reason'),
+                $request->input('notes')
             );
 
             $updatedLoan->load(['member', 'collection.catalog', 'returnedByAdmin']);

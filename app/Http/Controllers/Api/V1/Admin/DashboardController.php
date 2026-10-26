@@ -245,6 +245,30 @@ class DashboardController extends Controller
             }
         }
 
+        // 6. Problem Members & Circulation Cases Stats (Keranjang Anggota Bermasalah)
+        $totalProblemCases = \App\Models\MemberCart::count();
+        $activeProblemCases = \App\Models\MemberCart::where('is_resolved', false)->count();
+        $uniqueProblemMembers = \App\Models\MemberCart::where('is_resolved', false)->distinct('member_id')->count('member_id');
+        $problemMembersAll = \App\Models\MemberCart::distinct('member_id')->count('member_id');
+
+        $problemByCategory = [
+            'umum' => \App\Models\MemberCart::whereHas('member', function ($q) {
+                $q->where(function ($sq) {
+                    $sq->whereNull('job_category')
+                       ->orWhere('job_category', 'like', '%UMUM%')
+                       ->orWhere('job_category', 'like', '%PNS%')
+                       ->orWhere('job_category', 'like', '%ASN%')
+                       ->orWhere('job_category', 'like', '%SWASTA%');
+                });
+            })->count(),
+            'pelajar' => \App\Models\MemberCart::whereHas('member', function ($q) {
+                $q->where('job_category', 'like', '%PELAJAR%');
+            })->count(),
+            'mahasiswa' => \App\Models\MemberCart::whereHas('member', function ($q) {
+                $q->where('job_category', 'like', '%MAHASISWA%');
+            })->count(),
+        ];
+
         return response()->json([
             'success' => true,
             'message' => 'Data Dashboard Admin berhasil dimuat.',
@@ -261,6 +285,11 @@ class DashboardController extends Controller
                     'digital_count'           => $digitalCount,
                     'total_members'           => $totalMembers,
                     'today_circulation'       => $todayCirculation,
+                    'problem_cases'           => $totalProblemCases,
+                    'active_problem_cases'    => $activeProblemCases,
+                    'unique_problem_members'  => $uniqueProblemMembers,
+                    'problem_members_all'     => $problemMembersAll,
+                    'problem_by_category'     => $problemByCategory,
                 ],
                 'ddc' => [
                     'all' => $ddcItems,
@@ -269,6 +298,12 @@ class DashboardController extends Controller
                 'recent_activities' => $recentCatalogs,
                 'physical_status'   => $physicalStatus,
                 'top_books'         => $topBooks,
+                'problem_stats'     => [
+                    'total_cases'            => $totalProblemCases,
+                    'active_cases'           => $activeProblemCases,
+                    'unique_members'         => $uniqueProblemMembers,
+                    'by_category'            => $problemByCategory,
+                ],
             ],
         ], 200);
     }

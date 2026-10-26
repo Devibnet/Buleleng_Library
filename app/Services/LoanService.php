@@ -148,9 +148,9 @@ class LoanService
     /**
      * Pengembalian Buku
      */
-    public function returnBook(int $loanId, int $operatorAdminId): Loan
+    public function returnBook(int $loanId, int $operatorAdminId, ?string $condition = 'Baik', ?string $quarantineReason = null, ?string $notes = null): Loan
     {
-        return DB::transaction(function () use ($loanId, $operatorAdminId) {
+        return DB::transaction(function () use ($loanId, $operatorAdminId, $condition, $quarantineReason, $notes) {
             $loan = Loan::where('id', $loanId)
                 ->whereIn('status', [Loan::STATUS_BORROWED, Loan::STATUS_OVERDUE])
                 ->lockForUpdate()
@@ -178,11 +178,31 @@ class LoanService
                 'returned_by_user_id' => $operatorAdminId,
             ]);
 
-            // Kembalikan status koleksi menjadi AVAILABLE
-            $loan->collection->update(['availability_status' => 'AVAILABLE']);
+            $cond = $condition ?: 'Baik';
+            $isDamaged = in_array(strtolower($cond), ['rusak', 'rusak ringan', 'rusak berat', 'hilang', 'damaged']);
 
-            // Tambahkan stok catalog (+1)
-            $loan->collection->catalog->increment('available_copies');
+            if ($isDamaged) {
+                $loan->collection->update([
+                    'availability_status' => 'QUARANTINED',
+                    'physical_condition'  => $cond,
+                    'is_quarantine'       => true,
+                    'quarantine_reason'   => $quarantineReason ?: 'Buku dikembalikan dalam kondisi ' . $cond,
+                    'quarantine_notes'    => $notes,
+                ]);
+            } else {
+                $loan->collection->update([
+                    'availability_status' => 'AVAILABLE',
+                    'physical_condition'  => 'Baik',
+                    'is_quarantine'       => false,
+                    'quarantine_reason'   => null,
+                    'quarantine_notes'    => null,
+                ]);
+            }
+
+            // Hitung ulang stok catalog
+            if ($loan->collection->catalog) {
+                $loan->collection->catalog->recalculateCopies();
+            }
 
             return $loan;
         });

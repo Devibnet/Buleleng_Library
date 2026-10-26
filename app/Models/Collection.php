@@ -29,7 +29,10 @@ class Collection extends Model
         'access_type',
         'category',
         'availability_status',
+        'physical_condition',
         'is_quarantine',
+        'quarantine_reason',
+        'quarantine_notes',
     ];
 
     /**

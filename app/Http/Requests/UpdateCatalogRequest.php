@@ -22,7 +22,8 @@ class UpdateCatalogRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'title'                       => ['required', 'string', 'max:255'],
+            'title'                       => ['sometimes', 'required', 'string', 'max:255'],
+            'quarantine_reason'           => ['nullable', 'string', 'max:255'],
             'material_type'               => ['nullable', 'string', 'max:255'],
             'media_type'                  => ['nullable', 'string', 'max:255'],
             'subtitle'                    => ['nullable', 'string', 'max:255'],

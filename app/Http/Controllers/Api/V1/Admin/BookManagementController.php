@@ -548,21 +548,34 @@ class BookManagementController extends Controller
             });
         }
 
-        // Filter availability status
-        if ($request->filled('status') && $request->status !== 'all' && $request->status !== 'Semua Status Eksemplar') {
-            $status = $request->status;
-            if ($status === 'TERSEDIA' || $status === 'AVAILABLE' || $status === 'Tersedia di Rak') {
-                $query->where('availability_status', 'AVAILABLE')->where('is_quarantine', false);
-            } elseif ($status === 'DIPINJAM' || $status === 'BORROWED' || $status === 'Sedang Dipinjam') {
-                $query->where('availability_status', 'BORROWED');
-            } elseif ($status === 'BINDING' || $status === 'MAINTENANCE' || $status === 'Proses Binding') {
-                $query->where('availability_status', 'MAINTENANCE');
-            } elseif ($status === 'KARANTINA' || $status === 'QUARANTINED' || $status === 'Karantina') {
-                $query->where(function ($q) {
-                    $q->where('is_quarantine', true)->orWhere('availability_status', 'QUARANTINED');
-                });
-            } else {
-                $query->where('availability_status', $status);
+        // Filter status karantina vs aktif (Daftar Koleksi utama menyembunyikan koleksi/katalog yang dikarantina)
+        if ($request->filled('status') && in_array($request->status, ['KARANTINA', 'QUARANTINED', 'Karantina'])) {
+            $query->where(function ($q) {
+                $q->where('is_quarantine', true)
+                  ->orWhere('availability_status', 'QUARANTINED')
+                  ->orWhereHas('catalog', function ($cq) {
+                      $cq->where('is_quarantine', true);
+                  });
+            });
+        } else {
+            // Default di Daftar Koleksi: Koleksi karantina disembunyikan ("hilang bukunya")
+            $query->where('is_quarantine', false)
+                  ->where('availability_status', '!=', 'QUARANTINED')
+                  ->whereHas('catalog', function ($cq) {
+                      $cq->where('is_quarantine', false);
+                  });
+
+            if ($request->filled('status') && $request->status !== 'all' && $request->status !== 'Semua Status Eksemplar') {
+                $status = $request->status;
+                if ($status === 'TERSEDIA' || $status === 'AVAILABLE' || $status === 'Tersedia di Rak') {
+                    $query->where('availability_status', 'AVAILABLE');
+                } elseif ($status === 'DIPINJAM' || $status === 'BORROWED' || $status === 'Sedang Dipinjam') {
+                    $query->where('availability_status', 'BORROWED');
+                } elseif ($status === 'BINDING' || $status === 'MAINTENANCE' || $status === 'Proses Binding') {
+                    $query->where('availability_status', 'MAINTENANCE');
+                } else {
+                    $query->where('availability_status', $status);
+                }
             }
         }
 

@@ -25,7 +25,7 @@ class UpdateCollectionRequest extends FormRequest
         $collectionId = $this->route('collection_id') ?? $this->route('collection');
 
         return [
-            'barcode_no'            => ['required', 'string', 'max:100', Rule::unique('collections', 'barcode_no')->ignore($collectionId)],
+            'barcode_no'            => ['sometimes', 'required', 'string', 'max:100', Rule::unique('collections', 'barcode_no')->ignore($collectionId)],
             'item_number'           => ['nullable', 'string', 'max:100'],
             'rfid_no'               => ['nullable', 'string', 'max:100'],
             'exemplar_call_number'  => ['nullable', 'string', 'max:100'],

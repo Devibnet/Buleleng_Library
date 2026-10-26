@@ -16,17 +16,22 @@ class Member extends Authenticatable
 
     protected $fillable = [
         'member_no',
+        'nik',
         'name',
+        'gender',
         'residential_address',
         'ktp_address',
         'place_of_birth',
         'date_of_birth',
         'job_category',
         'institution_name',
+        'max_loans',
         'phone_number',
         'email',
         'password',
         'photo_path',
+        'status',
+        'valid_until',
         'google_id',
         'avatar',
     ];
@@ -45,6 +50,7 @@ class Member extends Authenticatable
     {
         return [
             'date_of_birth' => 'date',
+            'valid_until' => 'date',
             'password' => 'hashed',
         ];
     }
@@ -69,6 +75,36 @@ class Member extends Authenticatable
 
         do {
             $candidateNo = $prefix . str_pad((string) $sequence, 4, '0', STR_PAD_LEFT);
+            $exists = static::where('member_no', $candidateNo)->exists();
+            if ($exists) {
+                $sequence++;
+            }
+        } while ($exists);
+
+        return $candidateNo;
+    }
+
+    /**
+     * Generate member number matching ATLAS UI: ATL-YYYY-XXXXX
+     * Example: ATL-2026-00194
+     */
+    public static function generateAtlasMemberNo(string $prefixTag = 'ATL'): string
+    {
+        $year = now()->format('Y');
+        $prefix = "{$prefixTag}-{$year}-";
+
+        $lastMember = static::where('member_no', 'like', $prefix . '%')
+            ->orWhere('member_no', 'like', "AGT-{$year}-%")
+            ->orderBy('id', 'desc')
+            ->first();
+
+        $sequence = 194; // Realistic seed base or sequential
+        if ($lastMember && preg_match('/(\d+)$/', $lastMember->member_no, $matches)) {
+            $sequence = ((int) $matches[1]) + 1;
+        }
+
+        do {
+            $candidateNo = $prefix . str_pad((string) $sequence, 5, '0', STR_PAD_LEFT);
             $exists = static::where('member_no', $candidateNo)->exists();
             if ($exists) {
                 $sequence++;

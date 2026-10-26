@@ -10,6 +10,9 @@ use App\Http\Controllers\Api\MemberLoanReservationController;
 use App\Http\Controllers\Api\OnsiteReadingController;
 use App\Http\Controllers\Api\V1\Admin\BookManagementController;
 use App\Http\Controllers\Api\V1\Admin\DashboardController;
+use App\Http\Controllers\Api\V1\Admin\MemberManagementController;
+use App\Http\Controllers\Api\V1\Admin\ProblemCartController;
+use App\Http\Controllers\Api\V1\Admin\QuarantineController;
 use App\Http\Controllers\Api\V1\ProfileController;
 use App\Http\Controllers\Auth\MemberRegisterController;
 use App\Http\Controllers\BookController;
@@ -112,6 +115,7 @@ Route::prefix('v1')->group(function () {
         Route::match(['put', 'post'], '/', [ProfileController::class, 'update']);
         Route::post('/photo', [ProfileController::class, 'updatePhoto']);
         Route::put('/password', [ProfileController::class, 'updatePassword']);
+        Route::get('/problem-history', [\App\Http\Controllers\Api\V1\Admin\ProblemCartController::class, 'myProblemHistory']);
     });
 
     // 6. Admin Protected Area with RBAC Guard & Role Middleware
@@ -133,6 +137,36 @@ Route::prefix('v1')->group(function () {
             Route::delete('/books/{id}', [BookManagementController::class, 'destroyCatalog']);
             Route::put('/collections/{collection_id}', [BookManagementController::class, 'updateCollection']);
             Route::delete('/collections/{collection_id}', [BookManagementController::class, 'destroyCollection']);
+
+            // Modul Karantina Koleksi & Sinkronisasi OPAC
+            Route::get('/quarantine', [QuarantineController::class, 'index']);
+            Route::post('/quarantine/move', [QuarantineController::class, 'moveToQuarantine']);
+            Route::post('/quarantine/bulk-restore', [QuarantineController::class, 'bulkRestore']);
+            Route::post('/quarantine/bulk-delete', [QuarantineController::class, 'bulkDestroy']);
+            Route::post('/quarantine/{id}/restore', [QuarantineController::class, 'restore']);
+            Route::post('/quarantine/{id}/validate', [QuarantineController::class, 'validateCatalog']);
+
+            // Modul Manajemen Anggota Admin (CRUD, Search, Filter, Statistik, KTA, Bulk Delete, Export)
+            Route::get('/members/export', [MemberManagementController::class, 'export']);
+            Route::get('/members/next-number', [MemberManagementController::class, 'nextNumber']);
+            Route::post('/members/bulk-delete', [MemberManagementController::class, 'bulkDestroy']);
+            Route::get('/members', [MemberManagementController::class, 'index']);
+            Route::post('/members', [MemberManagementController::class, 'store']);
+            Route::get('/members/{id}', [MemberManagementController::class, 'show']);
+            Route::put('/members/{id}', [MemberManagementController::class, 'update']);
+            Route::delete('/members/{id}', [MemberManagementController::class, 'destroy']);
+
+            // Modul Keranjang Anggota Bermasalah (Problem Carts)
+            Route::get('/problem-carts', [ProblemCartController::class, 'index']);
+            Route::post('/problem-carts', [ProblemCartController::class, 'store']);
+            Route::post('/problem-carts/sync-circulation', [ProblemCartController::class, 'syncCirculation']);
+            Route::post('/problem-carts/bulk-action', [ProblemCartController::class, 'bulkAction']);
+            Route::get('/problem-carts/{id}', [ProblemCartController::class, 'show']);
+            Route::put('/problem-carts/{id}', [ProblemCartController::class, 'update']);
+            Route::post('/problem-carts/{id}/followup', [ProblemCartController::class, 'followup']);
+            Route::post('/problem-carts/{id}/resolve', [ProblemCartController::class, 'resolve']);
+            Route::delete('/problem-carts/{id}', [ProblemCartController::class, 'destroy']);
+            Route::get('/members/{id}/problem-history', [ProblemCartController::class, 'memberHistory']);
         });
 
         // Group 'super_admin': Kelola data akun staf admin

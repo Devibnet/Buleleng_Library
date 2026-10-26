@@ -69,6 +69,10 @@ class CirculationService
             $collection = Collection::where('catalog_id', $catalog->id)
                 ->where('availability_status', 'AVAILABLE')
                 ->where('is_quarantine', false)
+                ->where(function ($q) {
+                    $q->whereNull('physical_condition')
+                      ->orWhereNotIn('physical_condition', ['Rusak', 'Rusak Ringan', 'Rusak Berat', 'Hilang']);
+                })
                 ->lockForUpdate()
                 ->first();
 
@@ -76,11 +80,9 @@ class CirculationService
                 throw new Exception("Eksemplar fisik buku tidak tersedia untuk reservasi saat ini.");
             }
 
-            // Kurangi stok available_copies (-1)
-            $catalog->decrement('available_copies');
-
             // Set status ketersediaan koleksi menjadi PENDING_CHECK
             $collection->update(['availability_status' => 'PENDING_CHECK']);
+            $catalog->recalculateCopies();
 
             // Buat record loans dengan status PENDING_CHECK (pickup_deadline = null)
             $loan = Loan::create([
@@ -168,7 +170,7 @@ class CirculationService
             if ($loan->collection) {
                 $loan->collection->update(['availability_status' => 'AVAILABLE']);
                 if ($loan->collection->catalog) {
-                    $loan->collection->catalog->increment('available_copies');
+                    $loan->collection->catalog->recalculateCopies();
                 }
             }
 
@@ -221,17 +223,19 @@ class CirculationService
                 throw new Exception("Buku ini sedang tidak tersedia (Status: {$collection->availability_status}).");
             }
 
+            if (in_array(strtolower($collection->physical_condition ?? 'baik'), ['rusak', 'rusak ringan', 'rusak berat', 'hilang'])) {
+                throw new Exception("Eksemplar buku ini tidak dapat dipinjam karena kondisi fisik: {$collection->physical_condition}.");
+            }
+
             $catalog = Catalog::where('id', $collection->catalog_id)->lockForUpdate()->firstOrFail();
 
             if ($catalog->available_copies <= 0) {
                 throw new Exception("Stok ketersediaan katalog buku '{$catalog->title}' sudah habis.");
             }
 
-            // Kurangi stok available_copies (-1)
-            $catalog->decrement('available_copies');
-
             // Set status ketersediaan koleksi menjadi BORROWED
             $collection->update(['availability_status' => 'BORROWED']);
+            $catalog->recalculateCopies();
 
             // Buat record status = BORROWED, borrow_date = now, due_date = +loan_duration_days
             $loanDays = $durationDays ?: (int) get_setting('loan_duration_days', 7);
@@ -287,6 +291,9 @@ class CirculationService
 
             if ($loan->collection) {
                 $loan->collection->update(['availability_status' => 'BORROWED']);
+                if ($loan->collection->catalog) {
+                    $loan->collection->catalog->recalculateCopies();
+                }
             }
 
             return $loan;
@@ -298,11 +305,17 @@ class CirculationService
      * - Cari transaksi status == 'BORROWED' / 'OVERDUE'
      * - Hitung denda keterlambatan jika now() > due_date
      * - Ubah status = 'RETURNED', return_date = now
-     * - Tambahkan available_copies (+1)
+     * - Kelola kondisi fisik dan status ketersediaan eksemplar (jika rusak -> karantina)
      */
-    public function processReturn(string $memberNo, string $bookBarcode, ?int $operatorAdminId = null): Loan
-    {
-        return DB::transaction(function () use ($memberNo, $bookBarcode, $operatorAdminId) {
+    public function processReturn(
+        string $memberNo,
+        string $bookBarcode,
+        ?int $operatorAdminId = null,
+        ?string $condition = 'Baik',
+        ?string $quarantineReason = null,
+        ?string $notes = null
+    ): Loan {
+        return DB::transaction(function () use ($memberNo, $bookBarcode, $operatorAdminId, $condition, $quarantineReason, $notes) {
             $member = Member::where('member_no', $memberNo)
                 ->orWhere('id', $memberNo)
                 ->first();
@@ -338,7 +351,7 @@ class CirculationService
                 $fineAmount = $lateDays * $fineRate;
             }
 
-            // Ubah status = RETURNED, set return_date = now
+            // Ubah status loan = RETURNED, set return_date = now
             $loan->update([
                 'status'              => Loan::STATUS_RETURNED,
                 'return_date'         => now()->toDateString(),
@@ -347,11 +360,32 @@ class CirculationService
                 'returned_by_user_id' => $operatorAdminId,
             ]);
 
-            // Tambahkan available_copies (+1)
-            $collection->update(['availability_status' => 'AVAILABLE']);
+            $cond = $condition ?: 'Baik';
+            $isDamaged = in_array(strtolower($cond), ['rusak', 'rusak ringan', 'rusak berat', 'hilang', 'damaged']);
 
+            if ($isDamaged) {
+                // Buku rusak: hanya eksemplar ini yang masuk karantina!
+                $collection->update([
+                    'availability_status' => 'QUARANTINED',
+                    'physical_condition'  => $cond,
+                    'is_quarantine'       => true,
+                    'quarantine_reason'   => $quarantineReason ?: 'Buku dikembalikan dalam kondisi ' . $cond,
+                    'quarantine_notes'    => $notes,
+                ]);
+            } else {
+                // Buku kondisi baik: status ketersediaan kembali AVAILABLE
+                $collection->update([
+                    'availability_status' => 'AVAILABLE',
+                    'physical_condition'  => 'Baik',
+                    'is_quarantine'       => false,
+                    'quarantine_reason'   => null,
+                    'quarantine_notes'    => null,
+                ]);
+            }
+
+            // Hitung ulang ketersediaan stok fisik katalog
             if ($collection->catalog) {
-                $collection->catalog->increment('available_copies');
+                $collection->catalog->recalculateCopies();
             }
 
             return $loan;
@@ -441,7 +475,7 @@ class CirculationService
             $loan->collection->update(['availability_status' => 'AVAILABLE']);
 
             if ($loan->collection->catalog) {
-                $loan->collection->catalog->increment('available_copies');
+                $loan->collection->catalog->recalculateCopies();
             }
         }
     }

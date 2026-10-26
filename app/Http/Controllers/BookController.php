@@ -54,7 +54,8 @@ class BookController extends Controller
     {
         $search = $request->query('search');
 
-        $query = Catalog::query();
+        // OPAC publik hanya menampilkan katalog yang TIDAK dikarantina
+        $query = Catalog::where('is_quarantine', false);
 
         if ($search) {
             $query->where(function ($q) use ($search) {
@@ -115,14 +116,14 @@ class BookController extends Controller
     )]
     public function show(int $id): JsonResponse
     {
-        $catalog = Catalog::with(['collections' => function ($q) {
-            $q->where('is_quarantine', false);
-        }])->find($id);
+        $catalog = Catalog::with('collections')
+            ->where('is_quarantine', false)
+            ->find($id);
 
         if (! $catalog) {
             return response()->json([
                 'success' => false,
-                'message' => "Buku dengan ID {$id} tidak ditemukan.",
+                'message' => "Buku dengan ID {$id} tidak ditemukan atau sedang dalam karantina.",
             ], 404);
         }
 

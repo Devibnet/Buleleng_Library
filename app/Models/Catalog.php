@@ -43,6 +43,7 @@ class Catalog extends Model
         'total_copies',
         'available_copies',
         'is_quarantine',
+        'quarantine_reason',
     ];
 
     /**
@@ -61,5 +62,48 @@ class Catalog extends Model
     public function collections(): HasMany
     {
         return $this->hasMany(Collection::class, 'catalog_id');
+    }
+
+    /**
+     * Hitung ulang total dan ketersediaan stok fisik eksemplar.
+     */
+    public function recalculateCopies(): void
+    {
+        $total = $this->collections()->count();
+        $available = $this->collections()
+            ->where('availability_status', 'AVAILABLE')
+            ->where('is_quarantine', false)
+            ->where(function ($q) {
+                $q->whereNull('physical_condition')
+                  ->orWhereNotIn('physical_condition', ['Rusak', 'Rusak Ringan', 'Rusak Berat', 'Hilang']);
+            })
+            ->count();
+
+        $this->update([
+            'total_copies'     => $total,
+            'available_copies' => $available,
+        ]);
+    }
+
+    /**
+     * Helper counts breakdown.
+     */
+    public function getBorrowedCopiesCountAttribute(): int
+    {
+        return $this->collections()->where('availability_status', 'BORROWED')->count();
+    }
+
+    public function getQuarantinedCopiesCountAttribute(): int
+    {
+        return $this->collections()
+            ->where(fn($q) => $q->where('is_quarantine', true)->orWhere('availability_status', 'QUARANTINED'))
+            ->count();
+    }
+
+    public function getDamagedCopiesCountAttribute(): int
+    {
+        return $this->collections()
+            ->whereIn('physical_condition', ['Rusak', 'Rusak Ringan', 'Rusak Berat'])
+            ->count();
     }
 }

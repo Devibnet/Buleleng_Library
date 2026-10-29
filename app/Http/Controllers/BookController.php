@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Http\Resources\CatalogResource;
 use App\Models\Catalog;
+use App\Models\Collection;
+use App\Models\Loan;
 use App\Models\Member;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -129,6 +131,34 @@ class BookController extends Controller
             )
         ]
     )]
+    public function stats(): JsonResponse
+    {
+        $today = now()->toDateString();
+
+        $catalogIds = Catalog::where('is_quarantine', false)->select('id');
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Statistik koleksi perpustakaan berhasil diambil.',
+            'data'    => [
+                // Judul katalog & eksemplar fisik yang tampil di OPAC (tidak dikarantina)
+                'total_titles'    => Catalog::where('is_quarantine', false)->count(),
+                'total_copies'    => Collection::whereIn('catalog_id', $catalogIds)->where('is_quarantine', false)->count(),
+                // Buku yang saat ini berada di tangan anggota
+                'borrowed_now'    => Loan::whereIn('status', [Loan::STATUS_BORROWED, Loan::STATUS_OVERDUE])->count(),
+                // Anggota berstatus aktif dan kartu belum kedaluwarsa
+                'active_members'  => Member::where(function ($q) {
+                    $q->whereNull('status')->orWhere('status', 'like', 'Aktif%');
+                })->where(function ($q) use ($today) {
+                    $q->whereNull('valid_until')->orWhereDate('valid_until', '>=', $today);
+                })->count(),
+                // Transaksi peminjaman + pengembalian yang terjadi hari ini
+                'circulation_today' => Loan::whereDate('loan_date', $today)->count()
+                    + Loan::whereDate('return_date', $today)->count(),
+            ],
+        ]);
+    }
+
     public function show(int $id): JsonResponse
     {
         $catalog = Catalog::with('collections')

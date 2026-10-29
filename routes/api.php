@@ -32,6 +32,7 @@ use Illuminate\Support\Facades\Route;
 */
 
 // Public Catalog Endpoints (Bisa diakses tanpa login di root /books)
+Route::get('/opac/stats', [BookController::class, 'stats']);
 Route::get('/books', [BookController::class, 'index']);
 Route::get('/books/{id}', [BookController::class, 'show']);
 Route::post('/books/{id}/reserve', [ReservationController::class, 'reserve']);
@@ -90,6 +91,7 @@ Route::middleware(['auth:sanctum', 'admin.role:operator,admin,super_admin'])->pr
 Route::prefix('v1')->group(function () {
 
     // 1. Public Catalog Endpoints (v1)
+    Route::get('/opac/stats', [BookController::class, 'stats']);
     Route::get('/books', [BookController::class, 'index']);
     Route::get('/books/{id}', [BookController::class, 'show']);
 

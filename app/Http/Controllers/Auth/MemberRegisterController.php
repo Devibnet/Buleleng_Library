@@ -198,7 +198,7 @@ class MemberRegisterController extends Controller
         $existingMember = !empty($input['email']) ? Member::where('email', $input['email'])->first() : null;
         $isExistingGoogleOrUpdating = $existingMember !== null;
 
-        $emailRule = ['required', 'string', 'email', 'max:255'];
+        $emailRule = ['required', 'string', 'email', 'max:255', 'regex:/^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]{2,}(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/'];
         if ($isExistingGoogleOrUpdating) {
             $emailRule[] = \Illuminate\Validation\Rule::unique('members', 'email')->ignore($existingMember->id);
         } else {
@@ -206,8 +206,8 @@ class MemberRegisterController extends Controller
         }
 
         $passwordRule = $isExistingGoogleOrUpdating
-            ? ['nullable', 'string', \Illuminate\Validation\Rules\Password::min(8)->numbers()->symbols()]
-            : ['required', 'string', \Illuminate\Validation\Rules\Password::min(8)->numbers()->symbols()];
+            ? ['nullable', 'string', \Illuminate\Validation\Rules\Password::min(8)->mixedCase()->numbers()->symbols()]
+            : ['required', 'string', \Illuminate\Validation\Rules\Password::min(8)->mixedCase()->numbers()->symbols()];
 
         $validator = \Illuminate\Support\Facades\Validator::make($input, [
             'name'                => ['required', 'string', 'max:255'],
@@ -225,10 +225,11 @@ class MemberRegisterController extends Controller
             'name.required'         => 'Nama lengkap wajib diisi.',
             'email.required'        => 'Email wajib diisi.',
             'email.email'           => 'Format email tidak valid.',
+            'email.regex'           => 'Format email tidak valid. Contoh: nama@domain.com',
             'email.unique'          => 'Email ini sudah terdaftar sebagai anggota perpustakaan.',
             'password.required'     => 'Password wajib diisi.',
             'password.min'          => 'Password minimal harus 8 karakter.',
-            'password'              => 'Password minimal harus 8 karakter, mengandung setidaknya 1 angka dan 1 simbol.',
+            'password'              => 'Password minimal harus 8 karakter, mengandung setidaknya 1 huruf besar, 1 huruf kecil, 1 angka, dan 1 simbol.',
             'date_of_birth.date'    => 'Format tanggal lahir tidak valid.',
             'date_of_birth.before'  => 'Tanggal lahir harus sebelum hari ini.',
             'job_category.required' => 'Kategori pekerjaan wajib dipilih.',

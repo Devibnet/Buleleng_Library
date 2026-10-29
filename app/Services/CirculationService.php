@@ -346,7 +346,7 @@ class CirculationService
             $fineAmount = 0;
 
             if ($today->greaterThan($dueDate)) {
-                $lateDays = (int) $today->diffInDays($dueDate);
+                $lateDays = (int) $dueDate->diffInDays($today);
                 $fineRate = (float) get_setting('fine_per_day', 1000);
                 $fineAmount = $lateDays * $fineRate;
             }

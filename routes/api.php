@@ -10,10 +10,14 @@ use App\Http\Controllers\Api\MemberLoanReservationController;
 use App\Http\Controllers\Api\OnsiteReadingController;
 use App\Http\Controllers\Api\V1\Admin\AdminProfileController;
 use App\Http\Controllers\Api\V1\Admin\BookManagementController;
+use App\Http\Controllers\Api\V1\Admin\BorrowingController;
 use App\Http\Controllers\Api\V1\Admin\DashboardController;
+use App\Http\Controllers\Api\V1\Admin\LoanListController;
+use App\Http\Controllers\Api\V1\Admin\LockerDeskController;
 use App\Http\Controllers\Api\V1\Admin\MemberManagementController;
 use App\Http\Controllers\Api\V1\Admin\ProblemCartController;
 use App\Http\Controllers\Api\V1\Admin\QuarantineController;
+use App\Http\Controllers\Api\V1\Admin\ReturnController;
 use App\Http\Controllers\Api\V1\ProfileController;
 use App\Http\Controllers\Auth\MemberRegisterController;
 use App\Http\Controllers\BookController;
@@ -175,6 +179,27 @@ Route::prefix('v1')->group(function () {
             Route::post('/problem-carts/{id}/resolve', [ProblemCartController::class, 'resolve']);
             Route::delete('/problem-carts/{id}', [ProblemCartController::class, 'destroy']);
             Route::get('/members/{id}/problem-history', [ProblemCartController::class, 'memberHistory']);
+
+            // Modul Peminjaman Buku (Loket Sirkulasi)
+            Route::get('/circulation/borrow/member', [BorrowingController::class, 'member']);
+            Route::get('/circulation/borrow/collection', [BorrowingController::class, 'collection']);
+            Route::get('/circulation/borrow/collections/search', [BorrowingController::class, 'searchCollections']);
+            Route::post('/circulation/borrow', [BorrowingController::class, 'store']);
+
+            // Modul Pengembalian Buku (Loket Sirkulasi)
+            Route::get('/circulation/return/lookup', [ReturnController::class, 'lookup']);
+            Route::post('/circulation/return', [ReturnController::class, 'store']);
+
+            // Modul Daftar Pinjaman Koleksi (Monitoring Sirkulasi Aktif)
+            Route::get('/circulation/active-loans', [LoanListController::class, 'index']);
+            Route::get('/circulation/active-loans/export', [LoanListController::class, 'export']);
+            Route::post('/circulation/active-loans/sync', [LoanListController::class, 'sync']);
+
+            // Modul Peminjaman Loker Penitipan (Loket Ruang Baca)
+            Route::get('/lockers/desk/member', [LockerDeskController::class, 'member']);
+            Route::get('/lockers/desk/lockers', [LockerDeskController::class, 'lockers']);
+            Route::get('/lockers/desk/locker', [LockerDeskController::class, 'locker']);
+            Route::post('/lockers/desk/borrow', [LockerDeskController::class, 'borrow']);
 
             // Admin Profile Management (v1)
             Route::prefix('profile')->group(function () {

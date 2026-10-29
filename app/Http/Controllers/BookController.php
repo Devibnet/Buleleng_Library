@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Resources\CatalogResource;
 use App\Models\Catalog;
+use App\Models\Member;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use OpenApi\Attributes as OA;
@@ -56,6 +57,20 @@ class BookController extends Controller
 
         // OPAC publik hanya menampilkan katalog yang TIDAK dikarantina
         $query = Catalog::where('is_quarantine', false);
+
+        // Filter "Favorit Saya": hanya untuk anggota yang login (token Sanctum opsional di rute publik)
+        if ($request->boolean('favorites')) {
+            $member = auth('sanctum')->user();
+
+            if (! $member instanceof Member) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Wajib Login terlebih dahulu untuk melihat Buku Favorit.',
+                ], 401);
+            }
+
+            $query->whereIn('id', $member->favoriteCatalogs()->select('catalogs.id'));
+        }
 
         if ($search) {
             $query->where(function ($q) use ($search) {

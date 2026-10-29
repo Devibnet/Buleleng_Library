@@ -118,8 +118,7 @@ class CirculationService
     public function confirmReady($loanId, ?int $operatorAdminId = null): Loan
     {
         return DB::transaction(function () use ($loanId, $operatorAdminId) {
-            $loan = Loan::where('id', $loanId)
-                ->orWhere('reservation_code', $loanId)
+            $loan = Loan::where(fn ($q) => $q->where('id', $loanId)->orWhere('reservation_code', $loanId))
                 ->where('status', Loan::STATUS_PENDING_CHECK)
                 ->lockForUpdate()
                 ->first();
@@ -152,8 +151,7 @@ class CirculationService
     public function markUnavailable($loanId, ?string $reason = null, ?int $operatorAdminId = null): Loan
     {
         return DB::transaction(function () use ($loanId, $operatorAdminId) {
-            $loan = Loan::where('id', $loanId)
-                ->orWhere('reservation_code', $loanId)
+            $loan = Loan::where(fn ($q) => $q->where('id', $loanId)->orWhere('reservation_code', $loanId))
                 ->whereIn('status', [Loan::STATUS_PENDING_CHECK, Loan::STATUS_READY_FOR_PICKUP])
                 ->lockForUpdate()
                 ->first();
@@ -196,10 +194,16 @@ class CirculationService
                 throw new Exception("Anggota dengan nomor/ID '{$memberNo}' tidak ditemukan.");
             }
 
-            // Validasi Kuota Member: Count('RESERVED' + 'BORROWED') < max_borrow_qty
+            // Validasi Kuota Member: reservasi aktif + pinjaman aktif < max_borrow_qty
             $maxBorrowQty = (int) get_setting('max_borrow_qty', 3);
             $activeCount = Loan::where('member_id', $member->id)
-                ->whereIn('status', [Loan::STATUS_RESERVED, Loan::STATUS_BORROWED, Loan::STATUS_OVERDUE])
+                ->whereIn('status', [
+                    Loan::STATUS_PENDING_CHECK,
+                    Loan::STATUS_READY_FOR_PICKUP,
+                    Loan::STATUS_RESERVED,
+                    Loan::STATUS_BORROWED,
+                    Loan::STATUS_OVERDUE,
+                ])
                 ->count();
 
             if ($activeCount >= $maxBorrowQty) {
@@ -449,7 +453,8 @@ class CirculationService
      */
     public function handleExpiredReservations(): int
     {
-        $expiredLoans = Loan::where('status', Loan::STATUS_RESERVED)
+        $expiredLoans = Loan::whereIn('status', [Loan::STATUS_RESERVED, Loan::STATUS_READY_FOR_PICKUP])
+            ->whereNotNull('pickup_deadline')
             ->where('pickup_deadline', '<', now())
             ->get();
 
@@ -465,18 +470,57 @@ class CirculationService
     }
 
     /**
+     * FUNGSI MEMBER: Batalkan reservasi milik sendiri (PENDING_CHECK / READY_FOR_PICKUP)
+     * - Status menjadi CANCELLED dan eksemplar dikembalikan ke rak (AVAILABLE)
+     */
+    public function cancelReservation(int $memberId, int $loanId): Loan
+    {
+        return DB::transaction(function () use ($memberId, $loanId) {
+            $loan = Loan::where('id', $loanId)
+                ->where('member_id', $memberId)
+                ->whereNotNull('reservation_code')
+                ->lockForUpdate()
+                ->first();
+
+            if (! $loan) {
+                throw new Exception('Reservasi tidak ditemukan.');
+            }
+
+            if (! in_array($loan->status, [Loan::STATUS_PENDING_CHECK, Loan::STATUS_READY_FOR_PICKUP], true)) {
+                throw new Exception("Reservasi {$loan->reservation_code} tidak dapat dibatalkan (Status: {$loan->status}).");
+            }
+
+            $loan->update(['status' => Loan::STATUS_CANCELLED]);
+            $this->releaseReservedCollection($loan);
+
+            return $loan;
+        });
+    }
+
+    /**
+     * Kembalikan eksemplar ke rak (AVAILABLE) hanya jika eksemplar masih "dipegang" oleh reservasi.
+     * Eksemplar yang sudah dipinjam transaksi lain atau masuk karantina tidak boleh ikut berubah.
+     */
+    protected function releaseReservedCollection(Loan $loan): void
+    {
+        $collection = $loan->collection;
+        if (! $collection) {
+            return;
+        }
+
+        if (in_array($collection->availability_status, ['PENDING_CHECK', 'READY_FOR_PICKUP', 'RESERVED'], true)) {
+            $collection->update(['availability_status' => 'AVAILABLE']);
+        }
+
+        $collection->catalog?->recalculateCopies();
+    }
+
+    /**
      * Helper internal untuk membatalkan reservasi expired dan merestorasi stok
      */
     protected function cancelExpiredLoan(Loan $loan): void
     {
         $loan->update(['status' => Loan::STATUS_EXPIRED]);
-
-        if ($loan->collection) {
-            $loan->collection->update(['availability_status' => 'AVAILABLE']);
-
-            if ($loan->collection->catalog) {
-                $loan->collection->catalog->recalculateCopies();
-            }
-        }
+        $this->releaseReservedCollection($loan);
     }
 }

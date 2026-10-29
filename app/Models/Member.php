@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -80,6 +81,37 @@ class Member extends Authenticatable
             'valid_until' => 'date',
             'password' => 'hashed',
         ];
+    }
+
+    /**
+     * Katalog buku yang ditandai favorit (bintang) oleh anggota.
+     */
+    public function favoriteCatalogs(): BelongsToMany
+    {
+        return $this->belongsToMany(Catalog::class, 'member_favorites')->withTimestamps();
+    }
+
+    /**
+     * Alasan hak pinjam / reservasi anggota diblokir, atau null jika anggota boleh bertransaksi.
+     * Dipakai bersama oleh loket Peminjaman (admin) dan Reservasi Mandiri (anggota).
+     */
+    public function circulationBlockReason(): ?string
+    {
+        $status = $this->status ?: 'Aktif Bebas Pustaka';
+
+        if (! str_starts_with(strtolower($status), 'aktif')) {
+            return "Akses pinjam anggota sedang tidak aktif (Status: {$status}).";
+        }
+
+        if ($this->valid_until && $this->valid_until->isPast()) {
+            return 'Masa berlaku kartu anggota telah habis pada ' . $this->valid_until->format('d/m/Y') . '.';
+        }
+
+        if (MemberCart::where('member_id', $this->id)->where('is_resolved', false)->exists()) {
+            return 'Anggota masih memiliki kasus di Keranjang Bermasalah yang belum diselesaikan.';
+        }
+
+        return null;
     }
 
     /**

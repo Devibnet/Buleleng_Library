@@ -6,7 +6,6 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CirculationController;
 use App\Http\Controllers\Api\GuestbookController;
 use App\Http\Controllers\Api\LockerController;
-use App\Http\Controllers\Api\MemberLoanReservationController;
 use App\Http\Controllers\Api\OnsiteReadingController;
 use App\Http\Controllers\Api\V1\Admin\AdminProfileController;
 use App\Http\Controllers\Api\V1\Admin\BookManagementController;
@@ -17,7 +16,9 @@ use App\Http\Controllers\Api\V1\Admin\LockerDeskController;
 use App\Http\Controllers\Api\V1\Admin\MemberManagementController;
 use App\Http\Controllers\Api\V1\Admin\ProblemCartController;
 use App\Http\Controllers\Api\V1\Admin\QuarantineController;
+use App\Http\Controllers\Api\V1\Admin\ReservationDeskController;
 use App\Http\Controllers\Api\V1\Admin\ReturnController;
+use App\Http\Controllers\Api\V1\MemberSelfServiceController;
 use App\Http\Controllers\Api\V1\ProfileController;
 use App\Http\Controllers\Auth\MemberRegisterController;
 use App\Http\Controllers\BookController;
@@ -115,10 +116,14 @@ Route::prefix('v1')->group(function () {
     Route::post('/auth/member/register', [MemberRegisterController::class, 'registerApi']);
     Route::post('/auth/admin/login', [AuthController::class, 'loginAdmin']);
 
-    // 5. Member Protected Area (Guard: member)
-    Route::middleware('auth:member')->prefix('member')->group(function () {
-        Route::get('/reservations', [MemberLoanReservationController::class, 'index']);
-        Route::post('/reservations', [MemberLoanReservationController::class, 'store']);
+    // 5. Member Protected Area - Layanan Mandiri: Reservasi Saya & Pinjaman Saya (Guard: token Sanctum)
+    Route::middleware('auth:sanctum')->prefix('member')->group(function () {
+        Route::get('/reservations', [MemberSelfServiceController::class, 'reservations']);
+        Route::post('/reservations', [MemberSelfServiceController::class, 'reserve']);
+        Route::post('/reservations/{id}/cancel', [MemberSelfServiceController::class, 'cancel'])->whereNumber('id');
+        Route::get('/loans', [MemberSelfServiceController::class, 'loans']);
+        Route::get('/favorites', [MemberSelfServiceController::class, 'favorites']);
+        Route::post('/favorites/{catalogId}/toggle', [MemberSelfServiceController::class, 'toggleFavorite'])->whereNumber('catalogId');
     });
 
     // 5b. Profile Management Endpoints (Guard: auth:sanctum)
@@ -179,6 +184,13 @@ Route::prefix('v1')->group(function () {
             Route::post('/problem-carts/{id}/resolve', [ProblemCartController::class, 'resolve']);
             Route::delete('/problem-carts/{id}', [ProblemCartController::class, 'destroy']);
             Route::get('/members/{id}/problem-history', [ProblemCartController::class, 'memberHistory']);
+
+            // Modul Reservasi (Verifikasi Rak & Pengambilan di Loket)
+            Route::get('/circulation/reservation-desk', [ReservationDeskController::class, 'index']);
+            Route::get('/circulation/reservation-desk/lookup', [ReservationDeskController::class, 'lookup']);
+            Route::post('/circulation/reservation-desk/{id}/confirm-ready', [ReservationDeskController::class, 'confirmReady'])->whereNumber('id');
+            Route::post('/circulation/reservation-desk/{id}/mark-unavailable', [ReservationDeskController::class, 'markUnavailable'])->whereNumber('id');
+            Route::post('/circulation/reservation-desk/{id}/pickup', [ReservationDeskController::class, 'pickup'])->whereNumber('id');
 
             // Modul Peminjaman Buku (Loket Sirkulasi)
             Route::get('/circulation/borrow/member', [BorrowingController::class, 'member']);

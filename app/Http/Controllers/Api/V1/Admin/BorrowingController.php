@@ -7,7 +7,6 @@ use App\Http\Resources\LoanResource;
 use App\Models\Collection;
 use App\Models\Loan;
 use App\Models\Member;
-use App\Models\MemberCart;
 use App\Services\CirculationService;
 use Exception;
 use Illuminate\Http\JsonResponse;
@@ -20,7 +19,14 @@ use Illuminate\Support\Facades\DB;
  */
 class BorrowingController extends Controller
 {
-    private const ACTIVE_STATUSES = [Loan::STATUS_RESERVED, Loan::STATUS_BORROWED, Loan::STATUS_OVERDUE];
+    // Reservasi aktif ikut menghabiskan kuota pinjam anggota
+    private const ACTIVE_STATUSES = [
+        Loan::STATUS_PENDING_CHECK,
+        Loan::STATUS_READY_FOR_PICKUP,
+        Loan::STATUS_RESERVED,
+        Loan::STATUS_BORROWED,
+        Loan::STATUS_OVERDUE,
+    ];
 
     private const BLOCKED_CONDITIONS = ['rusak', 'rusak ringan', 'rusak berat', 'hilang'];
 
@@ -212,16 +218,8 @@ class BorrowingController extends Controller
         $active = Loan::where('member_id', $member->id)->whereIn('status', self::ACTIVE_STATUSES)->count();
         $status = $member->status ?: 'Aktif Bebas Pustaka';
 
-        $hasOpenProblem = MemberCart::where('member_id', $member->id)->where('is_resolved', false)->exists();
-        $expired = $member->valid_until && $member->valid_until->isPast();
-
-        $blockReason = match (true) {
-            ! str_starts_with(strtolower($status), 'aktif') => "Akses pinjam anggota sedang tidak aktif (Status: {$status}).",
-            $expired => 'Masa berlaku kartu anggota telah habis pada ' . $member->valid_until->format('d/m/Y') . '.',
-            $hasOpenProblem => 'Anggota masih memiliki kasus di Keranjang Bermasalah yang belum diselesaikan.',
-            $active >= $max => "Kuota pinjam sudah penuh ({$active}/{$max} buku).",
-            default => null,
-        };
+        $blockReason = $member->circulationBlockReason()
+            ?? ($active >= $max ? "Kuota pinjam sudah penuh ({$active}/{$max} buku, termasuk reservasi aktif)." : null);
 
         return [
             'id'               => $member->id,

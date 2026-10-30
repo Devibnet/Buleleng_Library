@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\GuestbookController;
 use App\Http\Controllers\Api\LockerController;
 use App\Http\Controllers\Api\OnsiteReadingController;
 use App\Http\Controllers\Api\V1\Admin\AdminProfileController;
+use App\Http\Controllers\Api\V1\Admin\BookImportController;
 use App\Http\Controllers\Api\V1\Admin\BookManagementController;
 use App\Http\Controllers\Api\V1\Admin\BorrowingController;
 use App\Http\Controllers\Api\V1\Admin\DashboardController;
@@ -150,6 +151,9 @@ Route::prefix('v1')->group(function () {
             Route::get('/books', [BookManagementController::class, 'index']);
             Route::get('/collections', [BookManagementController::class, 'listCollections']);
             Route::post('/books/import', [BookManagementController::class, 'importExcel']);
+            Route::post('/books/import/prepare', [BookImportController::class, 'prepare']);
+            Route::post('/books/import/{token}/process', [BookImportController::class, 'process']);
+            Route::delete('/books/import/{token}', [BookImportController::class, 'cancel']);
             Route::get('/books/{id}', [BookManagementController::class, 'show']);
             Route::post('/books', [BookManagementController::class, 'store']);
             Route::put('/books/{id}', [BookManagementController::class, 'updateCatalog']);

@@ -41,25 +41,35 @@ class ProfileController extends Controller
     protected function formatMemberData(Member $member): array
     {
         $photoUrl = $member->photo_url;
+        $activeProblemsCount = $member->memberCarts()->where('is_resolved', false)->count();
+        $isProblematic = $activeProblemsCount > 0
+            || str_contains(strtolower($member->status ?? ''), 'dibekukan')
+            || str_contains(strtolower($member->status ?? ''), 'bermasalah');
+        $status = $isProblematic ? 'Akses Dibekukan' : ($member->status ?: 'Aktif Bebas Pustaka');
 
         return [
-            'id'                  => $member->id,
-            'member_no'           => $member->member_no,
-            'name'                => $member->name,
-            'residential_address' => $member->residential_address,
-            'ktp_address'         => $member->ktp_address,
-            'place_of_birth'      => $member->place_of_birth,
-            'date_of_birth'       => $member->date_of_birth ? (is_string($member->date_of_birth) ? $member->date_of_birth : $member->date_of_birth->format('Y-m-d')) : null,
-            'job_category'        => $member->job_category,
-            'institution_name'    => $member->institution_name,
-            'phone_number'        => $member->phone_number,
-            'email'               => $member->email,
-            'photo_path'          => $photoUrl,
-            'photo_url'           => $photoUrl,
-            'google_id'           => $member->google_id,
-            'avatar'              => $member->avatar,
-            'created_at'          => $member->created_at ? $member->created_at->toIso8601String() : null,
-            'updated_at'          => $member->updated_at ? $member->updated_at->toIso8601String() : null,
+            'id'                       => $member->id,
+            'member_no'                => $member->member_no,
+            'name'                     => $member->name,
+            'status'                   => $status,
+            'is_problematic'           => $isProblematic,
+            'active_problems_count'    => $activeProblemsCount,
+            'circulation_block_reason' => $member->circulationBlockReason(),
+            'valid_until'              => $member->valid_until ? (is_string($member->valid_until) ? $member->valid_until : $member->valid_until->format('Y-m-d')) : null,
+            'residential_address'      => $member->residential_address,
+            'ktp_address'              => $member->ktp_address,
+            'place_of_birth'           => $member->place_of_birth,
+            'date_of_birth'            => $member->date_of_birth ? (is_string($member->date_of_birth) ? $member->date_of_birth : $member->date_of_birth->format('Y-m-d')) : null,
+            'job_category'             => $member->job_category,
+            'institution_name'         => $member->institution_name,
+            'phone_number'             => $member->phone_number,
+            'email'                    => $member->email,
+            'photo_path'               => $photoUrl,
+            'photo_url'                => $photoUrl,
+            'google_id'                => $member->google_id,
+            'avatar'                   => $member->avatar,
+            'created_at'               => $member->created_at ? $member->created_at->toIso8601String() : null,
+            'updated_at'               => $member->updated_at ? $member->updated_at->toIso8601String() : null,
         ];
     }
 

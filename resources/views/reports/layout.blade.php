@@ -6,7 +6,7 @@
     <title>{{ $title ?? 'Laporan Perpustakaan' }} - Dinas Kearsipan dan Perpustakaan Kabupaten Buleleng</title>
     <style>
         @page {
-            size: A4 portrait;
+            size: A4 {{ $orientation ?? 'portrait' }};
             margin: 15mm 15mm 15mm 15mm;
         }
 

@@ -210,7 +210,10 @@ class GuestbookController extends Controller
         parameters: [
             new OA\Parameter(name: "start_date", in: "query", required: false, schema: new OA\Schema(type: "string", format: "date")),
             new OA\Parameter(name: "end_date", in: "query", required: false, schema: new OA\Schema(type: "string", format: "date")),
-            new OA\Parameter(name: "visit_type", in: "query", required: false, schema: new OA\Schema(type: "string"))
+            new OA\Parameter(name: "visit_type", in: "query", required: false, schema: new OA\Schema(type: "string")),
+            new OA\Parameter(name: "search", in: "query", required: false, schema: new OA\Schema(type: "string")),
+            new OA\Parameter(name: "per_page", in: "query", required: false, schema: new OA\Schema(type: "integer", default: 15)),
+            new OA\Parameter(name: "page", in: "query", required: false, schema: new OA\Schema(type: "integer"))
         ],
         responses: [
             new OA\Response(
@@ -231,8 +234,9 @@ class GuestbookController extends Controller
         $startDate = $request->query('start_date');
         $endDate = $request->query('end_date');
         $visitType = $request->query('visit_type');
+        $perPage = min(max((int) $request->query('per_page', 15), 1), 100);
 
-        $reports = $this->guestbookService->getReports($startDate, $endDate, $visitType);
+        $reports = $this->guestbookService->getReports($startDate, $endDate, $visitType, $perPage, $request->query('search'));
 
         return response()->json([
             'success' => true,

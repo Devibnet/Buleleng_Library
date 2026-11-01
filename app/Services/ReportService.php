@@ -239,15 +239,20 @@ class ReportService
     /**
      * 5. LAPORAN BUKU TAMU / KUNJUNGAN
      */
-    public function getGuestbookReport(?string $startDate = null, ?string $endDate = null): array
+    public function getGuestbookReport(?string $startDate = null, ?string $endDate = null, ?string $visitType = null): array
     {
+        // visit_date disimpan dalam UTC, sedangkan periode laporan mengikuti hari layanan WITA
+        $timezone = 'Asia/Makassar';
         $query = Guestbook::query()->with('member');
 
         if ($startDate) {
-            $query->whereDate('visit_date', '>=', $startDate);
+            $query->where('visit_date', '>=', Carbon::parse($startDate, $timezone)->startOfDay()->utc());
         }
         if ($endDate) {
-            $query->whereDate('visit_date', '<=', $endDate);
+            $query->where('visit_date', '<=', Carbon::parse($endDate, $timezone)->endOfDay()->utc());
+        }
+        if ($visitType && $visitType !== 'ALL') {
+            $query->whereIn('visit_type', $visitType === 'NON_MEMBER' ? ['NON_MEMBER', 'INDIVIDUAL'] : [$visitType]);
         }
 
         $guestbooks = $query->latest('visit_date')->get();
@@ -265,31 +270,49 @@ class ReportService
             ])
             ->toArray();
 
-        // Agregasi JSON job_breakdown dan education_breakdown
+        // Agregasi pekerjaan & pendidikan: rombongan dari JSON breakdown, perorangan dari kolom job/education
         $jobBreakdownSum = [];
         $educationBreakdownSum = [];
 
+        $addCount = function (array &$sums, ?string $key, int $count, array $labels) {
+            $normKey = strtoupper(trim((string) $key));
+            if ($normKey === '' || $count <= 0) {
+                return;
+            }
+            $label = $labels[$normKey] ?? ucwords(strtolower(str_replace('_', ' ', $normKey)));
+            $sums[$label] = ($sums[$label] ?? 0) + $count;
+        };
+
         foreach ($guestbooks as $gb) {
-            if (is_array($gb->job_breakdown)) {
+            if (is_array($gb->job_breakdown) && count($gb->job_breakdown) > 0) {
                 foreach ($gb->job_breakdown as $key => $val) {
-                    $normKey = strtoupper(trim((string) $key));
-                    $jobBreakdownSum[$normKey] = ($jobBreakdownSum[$normKey] ?? 0) + (int) $val;
+                    $addCount($jobBreakdownSum, $key, (int) $val, Guestbook::JOB_LABELS);
                 }
+            } else {
+                $addCount($jobBreakdownSum, $gb->job, 1, Guestbook::JOB_LABELS);
             }
 
-            if (is_array($gb->education_breakdown)) {
+            if (is_array($gb->education_breakdown) && count($gb->education_breakdown) > 0) {
                 foreach ($gb->education_breakdown as $key => $val) {
-                    $normKey = strtoupper(trim((string) $key));
-                    $educationBreakdownSum[$normKey] = ($educationBreakdownSum[$normKey] ?? 0) + (int) $val;
+                    $addCount($educationBreakdownSum, $key, (int) $val, Guestbook::EDUCATION_LABELS);
                 }
+            } else {
+                $addCount($educationBreakdownSum, $gb->education, 1, Guestbook::EDUCATION_LABELS);
             }
         }
 
+        arsort($jobBreakdownSum);
+        arsort($educationBreakdownSum);
+
+        $formatDate = fn(?string $date) => $date ? Carbon::parse($date)->translatedFormat('d F Y') : 'Semua Waktu';
+
         return [
             'period' => [
-                'start_date' => $startDate ?? 'Semua Waktu',
-                'end_date'   => $endDate ?? 'Semua Waktu',
+                'start_date' => $formatDate($startDate),
+                'end_date'   => $formatDate($endDate),
             ],
+            'timezone' => $timezone,
+            'visit_type_label' => $visitType && $visitType !== 'ALL' ? (Guestbook::VISIT_TYPE_LABELS[$visitType] ?? $visitType) : 'Semua Jenis',
             'summary' => [
                 'total_entries'  => $totalEntries,
                 'total_visitors' => $totalVisitors,

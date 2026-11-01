@@ -4,12 +4,16 @@ namespace App\Services;
 
 use App\Models\Guestbook;
 use App\Models\Member;
+use Carbon\Carbon;
 use Exception;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 
 class GuestbookService
 {
+    // visit_date disimpan dalam UTC, sedangkan tanggal laporan mengikuti hari layanan WITA
+    private const LOCAL_TIMEZONE = 'Asia/Makassar';
+
     /**
      * 1. KUNJUNGAN ANGGOTA (recordMemberVisit)
      */
@@ -23,13 +27,9 @@ class GuestbookService
             throw new ModelNotFoundException("Anggota dengan nomor/ID '{$memberNo}' tidak ditemukan di sistem.");
         }
 
-        $maleCount = (isset($member->gender) && strtoupper($member->gender) === 'M') ? 1 : 0;
-        $femaleCount = (isset($member->gender) && strtoupper($member->gender) === 'F') ? 1 : 0;
-
-        // Jika gender di member belum diset, default ke 1 male jika 0
-        if ($maleCount === 0 && $femaleCount === 0) {
-            $maleCount = 1;
-        }
+        // Data anggota memakai L/P, sedangkan buku tamu memakai M/F
+        $femaleCount = in_array(strtoupper((string) $member->gender), ['P', 'F'], true) ? 1 : 0;
+        $maleCount = 1 - $femaleCount;
 
         return Guestbook::create([
             'visit_type'          => 'MEMBER',
@@ -38,6 +38,8 @@ class GuestbookService
             'phone_number'        => $member->phone_number,
             'address'             => $member->residential_address,
             'institution_name'    => $member->institution_name,
+            'job'                 => $member->job_category,
+            'visit_purpose'       => 'Baca di Tempat',
             'total_personnel'     => 1,
             'gender_male_count'   => $maleCount,
             'gender_female_count' => $femaleCount,
@@ -61,6 +63,9 @@ class GuestbookService
             'phone_number'        => $data['phone_number'] ?? null,
             'address'             => $data['address'] ?? null,
             'institution_name'    => $data['institution_name'] ?? null,
+            'job'                 => $data['job'],
+            'education'           => $data['education'],
+            'visit_purpose'       => $data['visit_purpose'] ?? null,
             'total_personnel'     => 1,
             'gender_male_count'   => $maleCount,
             'gender_female_count' => $femaleCount,
@@ -90,6 +95,8 @@ class GuestbookService
             'institution_name'    => $data['institution_name'],
             'institution_address' => $data['institution_address'] ?? null,
             'institution_email'   => $data['institution_email'] ?? null,
+            'institution_phone'   => $data['institution_phone'] ?? null,
+            'visit_purpose'       => $data['visit_purpose'],
             'total_personnel'     => $total,
             'gender_male_count'   => $male,
             'gender_female_count' => $female,
@@ -102,20 +109,30 @@ class GuestbookService
     /**
      * 4. REKAP & LAPORAN KUNJUNGAN (getReports)
      */
-    public function getReports(?string $startDate = null, ?string $endDate = null, ?string $visitType = null, int $perPage = 15): array
+    public function getReports(?string $startDate = null, ?string $endDate = null, ?string $visitType = null, int $perPage = 15, ?string $search = null): array
     {
         $query = Guestbook::with('member');
 
         if (! empty($startDate)) {
-            $query->whereDate('visit_date', '>=', $startDate);
+            $query->where('visit_date', '>=', Carbon::parse($startDate, self::LOCAL_TIMEZONE)->startOfDay()->utc());
         }
 
         if (! empty($endDate)) {
-            $query->whereDate('visit_date', '<=', $endDate);
+            $query->where('visit_date', '<=', Carbon::parse($endDate, self::LOCAL_TIMEZONE)->endOfDay()->utc());
         }
 
         if (! empty($visitType) && $visitType !== 'ALL') {
-            $query->where('visit_type', $visitType);
+            // Data lama bertipe INDIVIDUAL setara dengan pengunjung non-anggota
+            $query->whereIn('visit_type', $visitType === 'NON_MEMBER' ? ['NON_MEMBER', 'INDIVIDUAL'] : [$visitType]);
+        }
+
+        if (! empty($search)) {
+            $query->where(function ($q) use ($search) {
+                $q->where('visitor_name', 'like', "%{$search}%")
+                    ->orWhere('institution_name', 'like', "%{$search}%")
+                    ->orWhere('visit_purpose', 'like', "%{$search}%")
+                    ->orWhereHas('member', fn ($member) => $member->where('member_no', 'like', "%{$search}%"));
+            });
         }
 
         // Clone query untuk kalkulasi total statistik agregasi
@@ -128,14 +145,14 @@ class GuestbookService
         // Agregasi Harian (Daily Summary)
         $dailySummary = (clone $query)
             ->select([
-                DB::raw('DATE(visit_date) as date'),
+                DB::raw('DATE(DATE_ADD(visit_date, INTERVAL 8 HOUR)) as date'),
                 DB::raw('COUNT(*) as total_records'),
                 DB::raw('SUM(total_personnel) as total_visitors'),
                 DB::raw('SUM(gender_male_count) as male_visitors'),
                 DB::raw('SUM(gender_female_count) as female_visitors'),
             ])
-            ->groupBy(DB::raw('DATE(visit_date)'))
-            ->orderBy(DB::raw('DATE(visit_date)'), 'desc')
+            ->groupBy(DB::raw('DATE(DATE_ADD(visit_date, INTERVAL 8 HOUR))'))
+            ->orderBy(DB::raw('DATE(DATE_ADD(visit_date, INTERVAL 8 HOUR))'), 'desc')
             ->get();
 
         $logs = $query->orderBy('id', 'desc')->paginate($perPage);

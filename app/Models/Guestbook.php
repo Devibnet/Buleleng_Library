@@ -13,6 +13,44 @@ class Guestbook extends Model
 
     protected $table = 'guestbooks';
 
+    public const VISIT_TYPE_LABELS = [
+        'MEMBER'     => 'Anggota',
+        'NON_MEMBER' => 'Non Anggota',
+        'GROUP'      => 'Rombongan',
+        'INDIVIDUAL' => 'Non Anggota',
+    ];
+
+    public const JOB_LABELS = [
+        'PNS'        => 'Pegawai Negeri',
+        'SWASTA'     => 'Pegawai Swasta',
+        'PENELITI'   => 'Peneliti',
+        'DOSEN'      => 'Dosen',
+        'GURU'       => 'Guru',
+        'TNI_POLRI'  => 'TNI / POLRI',
+        'PENSIUNAN'  => 'Pensiunan',
+        'WIRASWASTA' => 'Wiraswasta',
+        'MAHASISWA'  => 'Mahasiswa',
+        'PELAJAR'    => 'Pelajar',
+        'LAINNYA'    => 'Lainnya',
+    ];
+
+    public const EDUCATION_LABELS = [
+        'SD'  => 'SD',
+        'SMP' => 'SMP (sederajat)',
+        'SMA' => 'SMA (sederajat)',
+        'D1'  => 'Diploma (D1)',
+        'D2'  => 'Diploma (D2)',
+        'D3'  => 'Diploma (D3)',
+        'S1'  => 'Sarjana (S1)',
+        'S2'  => 'Magister (S2)',
+        'S3'  => 'Doktor (S3)',
+    ];
+
+    // Nama orang: huruf, spasi, dan tanda baca gelar (titik, koma, apostrof, strip)
+    public const PERSON_NAME_REGEX = "/^[\pL\s.,'-]+$/u";
+
+    public const PHONE_REGEX = '/^[0-9]+$/';
+
     protected $fillable = [
         'visit_type',
         'member_id',
@@ -21,7 +59,11 @@ class Guestbook extends Model
         'institution_name',
         'institution_address',
         'institution_email',
+        'institution_phone',
         'address',
+        'job',
+        'education',
+        'visit_purpose',
         'total_personnel',
         'gender_male_count',
         'gender_female_count',

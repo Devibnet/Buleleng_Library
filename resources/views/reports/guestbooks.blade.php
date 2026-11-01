@@ -36,7 +36,7 @@
     <table width="100%" style="border-collapse: collapse; margin-bottom: 15px;">
         <tr>
             <td width="50%" style="vertical-align: top; padding-right: 6px;">
-                <div class="section-title">Aggregated Job Breakdown (Demografi Pekerjaan)</div>
+                <div class="section-title">Demografi Pekerjaan Pengunjung</div>
                 <table class="table-data">
                     <thead>
                         <tr>
@@ -51,13 +51,13 @@
                                 <td align="center"><strong>{{ number_format($count) }}</strong> orang</td>
                             </tr>
                         @empty
-                            <tr><td colspan="2" align="center">Belum ada data breakdown pekerjaan</td></tr>
+                            <tr><td colspan="2" align="center">Belum ada data pekerjaan</td></tr>
                         @endforelse
                     </tbody>
                 </table>
             </td>
             <td width="50%" style="vertical-align: top; padding-left: 6px;">
-                <div class="section-title">Aggregated Education Breakdown (Tingkat Pendidikan)</div>
+                <div class="section-title">Tingkat Pendidikan Pengunjung</div>
                 <table class="table-data">
                     <thead>
                         <tr>
@@ -72,7 +72,7 @@
                                 <td align="center"><strong>{{ number_format($count) }}</strong> orang</td>
                             </tr>
                         @empty
-                            <tr><td colspan="2" align="center">Belum ada data breakdown pendidikan</td></tr>
+                            <tr><td colspan="2" align="center">Belum ada data pendidikan</td></tr>
                         @endforelse
                     </tbody>
                 </table>
@@ -81,39 +81,57 @@
     </table>
 
     <!-- DAFTAR LOG KUNJUNGAN BUKU TAMU -->
-    <div class="section-title">Daftar Log Kunjungan Perpustakaan</div>
+    <div class="section-title">Daftar Log Kunjungan Perpustakaan ({{ $visit_type_label ?? 'Semua Jenis' }})</div>
     <table class="table-data">
         <thead>
             <tr>
-                <th width="5%">No</th>
-                <th>Tgl Kunjungan</th>
-                <th>Tipe Kunjungan</th>
+                <th width="4%">No</th>
+                <th width="11%">Waktu (WITA)</th>
+                <th width="8%">Jenis</th>
                 <th>Nama Pengunjung / Instansi</th>
-                <th>Pria</th>
-                <th>Wanita</th>
-                <th>Total Personel</th>
-                <th>Alamat</th>
+                <th width="15%">Pekerjaan / Pendidikan</th>
+                <th width="17%">Keperluan</th>
+                <th width="5%">L</th>
+                <th width="5%">P</th>
+                <th width="6%">Total</th>
             </tr>
         </thead>
         <tbody>
             @forelse($guestbooks_list as $index => $item)
                 <tr>
                     <td align="center">{{ $index + 1 }}</td>
-                    <td>{{ $item->visit_date ? $item->visit_date->format('d/m/Y H:i') : '-' }}</td>
-                    <td><span class="badge badge-info">{{ $item->visit_type }}</span></td>
+                    <td>{{ $item->visit_date ? $item->visit_date->copy()->timezone($timezone ?? 'Asia/Makassar')->format('d/m/Y H:i') : '-' }}</td>
+                    <td><span class="badge badge-info">{{ \App\Models\Guestbook::VISIT_TYPE_LABELS[$item->visit_type] ?? $item->visit_type }}</span></td>
                     <td>
-                        <strong>{{ $item->visitor_name }}</strong>
-                        @if($item->institution_name)
-                            <br><small style="color: #64748b;">Instansi: {{ $item->institution_name }}</small>
+                        @if($item->visit_type === 'GROUP')
+                            <strong>{{ $item->institution_name }}</strong>
+                            <br><small style="color: #64748b;">Ketua: {{ $item->visitor_name }}{{ $item->phone_number ? ', Telp. ' . $item->phone_number : '' }}</small>
+                        @else
+                            <strong>{{ $item->visitor_name }}</strong>
+                            @if($item->member)
+                                <br><small style="color: #64748b;">No. Anggota: {{ $item->member->member_no }}</small>
+                            @elseif($item->institution_name)
+                                <br><small style="color: #64748b;">Instansi: {{ $item->institution_name }}</small>
+                            @endif
                         @endif
                     </td>
+                    <td>
+                        @if($item->visit_type === 'GROUP')
+                            -
+                        @else
+                            {{ \App\Models\Guestbook::JOB_LABELS[$item->job] ?? ($item->job ? ucwords(strtolower($item->job)) : '-') }}
+                            @if($item->education)
+                                <br><small style="color: #64748b;">{{ \App\Models\Guestbook::EDUCATION_LABELS[$item->education] ?? $item->education }}</small>
+                            @endif
+                        @endif
+                    </td>
+                    <td>{{ $item->visit_purpose ?? '-' }}</td>
                     <td align="center">{{ $item->gender_male_count }}</td>
                     <td align="center">{{ $item->gender_female_count }}</td>
                     <td align="center"><strong>{{ $item->total_personnel }}</strong></td>
-                    <td>{{ $item->address ?? '-' }}</td>
                 </tr>
             @empty
-                <tr><td colspan="8" align="center">Tidak ada log kunjungan buku tamu</td></tr>
+                <tr><td colspan="9" align="center">Tidak ada log kunjungan buku tamu</td></tr>
             @endforelse
         </tbody>
     </table>

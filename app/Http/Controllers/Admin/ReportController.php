@@ -205,8 +205,9 @@ class ReportController extends Controller
         $endDate   = $request->query('end_date');
         $exportType = strtolower($request->query('export_type', 'view'));
 
-        $data = $this->reportService->getGuestbookReport($startDate, $endDate);
+        $data = $this->reportService->getGuestbookReport($startDate, $endDate, $request->query('visit_type'));
         $data['title'] = 'Laporan Buku Tamu & Kunjungan Perpustakaan';
+        $data['orientation'] = 'landscape';
 
         return $this->formatExportResponse($request, 'reports.guestbooks', $data, 'Laporan_Buku_Tamu', $exportType);
     }
@@ -221,7 +222,7 @@ class ReportController extends Controller
 
         if ($exportType === 'pdf') {
             if (class_exists(Pdf::class)) {
-                $pdf = Pdf::loadView($viewName, $data)->setPaper('a4', 'portrait');
+                $pdf = Pdf::loadView($viewName, $data)->setPaper('a4', $data['orientation'] ?? 'portrait');
                 return $pdf->download("{$filename}.pdf");
             }
             return response()->view($viewName, $data);

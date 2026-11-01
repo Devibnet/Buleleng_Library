@@ -290,7 +290,7 @@ Route::prefix('v1')->group(function () {
         });
 
         // Group 'guestbooks': Rekap & Laporan Buku Tamu
-        Route::middleware(['auth:admin', 'admin.role:operator,admin,super_admin'])->prefix('guestbooks')->group(function () {
+        Route::middleware(['auth:sanctum', 'admin.role:operator,admin,super_admin'])->prefix('guestbooks')->group(function () {
             Route::get('/reports', [GuestbookController::class, 'reports']);
         });
 

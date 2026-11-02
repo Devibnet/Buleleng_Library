@@ -32,6 +32,47 @@ class GuestbookGroupRequest extends FormRequest
         ];
     }
 
+    /**
+     * Pastikan jenis kelamin, distribusi pekerjaan, dan distribusi pendidikan
+     * masing-masing berjumlah sama persis dengan total personil.
+     */
+    public function after(): array
+    {
+        return [
+            function (\Illuminate\Validation\Validator $validator) {
+                if ($validator->errors()->isNotEmpty()) {
+                    return;
+                }
+
+                $total = (int) $this->input('total_personnel');
+
+                $genderSum = (int) $this->input('gender_male_count') + (int) $this->input('gender_female_count');
+                if ($genderSum !== $total) {
+                    $validator->errors()->add(
+                        'gender_male_count',
+                        "Jumlah laki-laki dan perempuan ({$genderSum} orang) harus sama dengan total personil ({$total} orang)."
+                    );
+                }
+
+                $jobSum = array_sum(array_map('intval', (array) $this->input('job_breakdown', [])));
+                if ($jobSum !== $total) {
+                    $validator->errors()->add(
+                        'job_breakdown',
+                        "Distribusi pekerjaan personil berjumlah {$jobSum} orang, harus sama dengan total personil ({$total} orang)."
+                    );
+                }
+
+                $educationSum = array_sum(array_map('intval', (array) $this->input('education_breakdown', [])));
+                if ($educationSum !== $total) {
+                    $validator->errors()->add(
+                        'education_breakdown',
+                        "Distribusi pendidikan terakhir berjumlah {$educationSum} orang, harus sama dengan total personil ({$total} orang)."
+                    );
+                }
+            },
+        ];
+    }
+
     public function messages(): array
     {
         return [

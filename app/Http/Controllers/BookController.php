@@ -74,16 +74,81 @@ class BookController extends Controller
             $query->whereIn('id', $member->favoriteCatalogs()->select('catalogs.id'));
         }
 
+        // Kata kunci utama, bisa dibatasi ke satu kolom lewat parameter "field"
+        $fieldMap = [
+            'title'     => ['title', 'subtitle'],
+            'author'    => ['author_main', 'author_additional_person', 'author_corporate'],
+            'publisher' => ['publisher'],
+            'subject'   => ['subject_topic'],
+            'isbn'      => ['isbn', 'issn'],
+        ];
+        $field = $request->query('field');
+        $searchColumns = $fieldMap[$field] ?? ['title', 'author_main', 'publisher', 'isbn', 'subject_topic'];
+
         if ($search) {
-            $query->where(function ($q) use ($search) {
-                $q->where('title', 'like', "%{$search}%")
-                  ->orWhere('author_main', 'like', "%{$search}%")
-                  ->orWhere('publisher', 'like', "%{$search}%")
-                  ->orWhere('isbn', 'like', "%{$search}%");
+            $query->where(function ($q) use ($search, $searchColumns) {
+                foreach ($searchColumns as $column) {
+                    $q->orWhere($column, 'like', "%{$search}%");
+                }
             });
         }
 
-        $catalogs = $query->orderBy('id', 'desc')->paginate(15);
+        // Filter lanjutan OPAC
+        if ($author = trim((string) $request->query('author'))) {
+            $query->where(function ($q) use ($author) {
+                $q->where('author_main', 'like', "%{$author}%")
+                  ->orWhere('author_additional_person', 'like', "%{$author}%")
+                  ->orWhere('author_corporate', 'like', "%{$author}%");
+            });
+        }
+        if ($publisher = trim((string) $request->query('publisher'))) {
+            $query->where('publisher', 'like', "%{$publisher}%");
+        }
+        if ($subject = trim((string) $request->query('subject'))) {
+            $query->where('subject_topic', 'like', "%{$subject}%");
+        }
+
+        $yearFrom = (int) $request->query('year_from');
+        $yearTo = (int) $request->query('year_to');
+        if ($yearFrom > 0) {
+            $query->whereRaw('CAST(publish_year AS UNSIGNED) >= ?', [$yearFrom]);
+        }
+        if ($yearTo > 0) {
+            $query->whereRaw('CAST(publish_year AS UNSIGNED) <= ?', [$yearTo]);
+        }
+
+        // Jenis bahan: boleh lebih dari satu, dipisah koma (mis. "Monograf,Referensi")
+        $materials = array_values(array_filter(array_map('trim', explode(',', (string) $request->query('material')))));
+        if (! empty($materials)) {
+            $query->whereIn('material_type', $materials);
+        }
+
+        if ($request->boolean('available')) {
+            $query->where('available_copies', '>', 0);
+        }
+
+        // Pengurutan
+        switch ($request->query('sort')) {
+            case 'oldest':
+                $query->orderBy('id', 'asc');
+                break;
+            case 'title_asc':
+                $query->orderBy('title', 'asc');
+                break;
+            case 'title_desc':
+                $query->orderBy('title', 'desc');
+                break;
+            case 'year_desc':
+                $query->orderByRaw('CAST(publish_year AS UNSIGNED) DESC')->orderBy('id', 'desc');
+                break;
+            case 'year_asc':
+                $query->orderByRaw('CAST(publish_year AS UNSIGNED) ASC')->orderBy('id', 'desc');
+                break;
+            default:
+                $query->orderBy('id', 'desc');
+        }
+
+        $catalogs = $query->paginate(15);
 
         return response()->json([
             'success' => true,

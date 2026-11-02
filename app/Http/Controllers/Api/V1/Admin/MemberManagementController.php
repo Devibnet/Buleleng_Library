@@ -46,7 +46,26 @@ class MemberManagementController extends Controller
 
         // Filter Status
         if ($request->filled('status') && $request->status !== 'all') {
-            $query->where('status', $request->status);
+            $status = strtolower(trim($request->status));
+
+            if ($status === 'aktif') {
+                // Anggota aktif: bukan yang dibekukan / bermasalah (status NULL ikut dianggap aktif)
+                $query->where(function ($q) {
+                    $q->whereNull('status')
+                      ->orWhere(function ($q2) {
+                          $q2->where('status', 'not like', '%dibekukan%')
+                             ->where('status', 'not like', '%bermasalah%');
+                      });
+                });
+            } elseif ($status === 'bermasalah') {
+                $query->where(function ($q) {
+                    $q->where('status', 'like', '%dibekukan%')
+                      ->orWhere('status', 'like', '%bermasalah%');
+                });
+            } else {
+                // Nilai status persis, mis. "Aktif Bebas Pustaka"
+                $query->where('status', $request->status);
+            }
         }
 
         // Sorting

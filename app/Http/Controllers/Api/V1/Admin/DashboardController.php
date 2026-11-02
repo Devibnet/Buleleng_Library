@@ -63,7 +63,15 @@ class DashboardController extends Controller
         })->count();
 
         $totalMembers = Member::count();
-        $todayCirculation = Loan::whereDate('created_at', Carbon::today())->count();
+        // Sirkulasi hari ini = transaksi peminjaman + pengembalian yang benar-benar terjadi hari ini
+        // (reservasi yang batal / kedaluwarsa tidak dihitung)
+        $todayLoans = Loan::whereDate('loan_date', Carbon::today())
+            ->whereIn('status', ['BORROWED', 'RETURNED', 'OVERDUE'])
+            ->count();
+        $todayReturns = Loan::whereDate('return_date', Carbon::today())
+            ->where('status', 'RETURNED')
+            ->count();
+        $todayCirculation = $todayLoans + $todayReturns;
 
         // 2. DDC Distribution Calculations
         $allCatalogs = Catalog::select('id', 'ddc_number', 'material_type')->get();
@@ -151,49 +159,61 @@ class DashboardController extends Controller
             });
 
         // 4. Physical Condition Status
-        $goodConditionCount = Collection::where('availability_status', 'AVAILABLE')
-            ->where('is_quarantine', false)
-            ->count();
-        $damagedCount = Collection::where(function ($q) {
-            $q->where('availability_status', 'DAMAGED')
-              ->orWhere('availability_status', 'RUSAK');
-        })->count();
-        $bindingCount = Collection::where(function ($q) {
-            $q->where('availability_status', 'BINDING')
-              ->orWhere('availability_status', 'REPAIR');
-        })->count();
-        $lostCount = Collection::where(function ($q) {
-            $q->where('availability_status', 'LOST')
-              ->orWhere('availability_status', 'HILANG');
-        })->count();
+        // Keempat kategori dibuat saling eksklusif agar jumlahnya konsisten:
+        // karantina/hilang > dipinjam > rusak (kolom physical_condition) > baik & siap rak.
+        $isQuarantineOrLost = function ($q) {
+            $q->where('is_quarantine', true)
+              ->orWhereIn('availability_status', ['QUARANTINED', 'LOST', 'HILANG']);
+        };
+        $notQuarantineOrLost = function ($q) {
+            $q->where('is_quarantine', false)
+              ->whereNotIn('availability_status', ['QUARANTINED', 'LOST', 'HILANG']);
+        };
+        $isDamaged = function ($q) {
+            $q->whereIn('physical_condition', ['Rusak', 'Rusak Ringan', 'Rusak Berat', 'Perlu Perbaikan'])
+              ->orWhereIn('availability_status', ['DAMAGED', 'RUSAK', 'BINDING', 'REPAIR']);
+        };
 
-        // Hitung persentase fisik
+        $quarantineOrLostCount = Collection::where($isQuarantineOrLost)->count();
+        $physicalBorrowedCount = Collection::where($notQuarantineOrLost)
+            ->where('availability_status', 'BORROWED')
+            ->count();
+        $damagedCount = Collection::where($notQuarantineOrLost)
+            ->where('availability_status', '!=', 'BORROWED')
+            ->where($isDamaged)
+            ->count();
+        $goodConditionCount = Collection::where($notQuarantineOrLost)
+            ->where('availability_status', 'AVAILABLE')
+            ->where(function ($q) {
+                $q->whereNull('physical_condition')
+                  ->orWhereNotIn('physical_condition', ['Rusak', 'Rusak Ringan', 'Rusak Berat', 'Perlu Perbaikan']);
+            })
+            ->count();
+
+        // Hitung persentase fisik (1 desimal agar kategori kecil tidak tampil 0%)
         $calcTotalCol = max($totalCollections, 1);
-        $goodPct = round(($goodConditionCount / $calcTotalCol) * 100);
-        $borrowedPct = round(($borrowedCollections / $calcTotalCol) * 100);
-        $damagedPct = round(($damagedCount / $calcTotalCol) * 100);
-        $otherPct = max(0, 100 - $goodPct - $borrowedPct - $damagedPct);
+        $pct = fn ($count) => round(($count / $calcTotalCol) * 100, 1);
 
         $physicalStatus = [
             'good' => [
                 'label'      => 'Kondisi Baik & Siap Rak',
                 'count'      => $goodConditionCount,
-                'percentage' => $goodPct,
+                'percentage' => $pct($goodConditionCount),
             ],
             'borrowed' => [
                 'label'      => 'Sedang Dipinjam Pemustaka',
-                'count'      => $borrowedCollections,
-                'percentage' => $borrowedPct,
+                'count'      => $physicalBorrowedCount,
+                'percentage' => $pct($physicalBorrowedCount),
             ],
             'damaged' => [
                 'label'      => 'Rusak / Perlu Perbaikan',
-                'count'      => $damagedCount + $bindingCount,
-                'percentage' => $damagedPct,
+                'count'      => $damagedCount,
+                'percentage' => $pct($damagedCount),
             ],
             'quarantine_or_lost' => [
                 'label'      => 'Karantina / Hilang',
-                'count'      => $quarantineCollections + $lostCount,
-                'percentage' => $otherPct,
+                'count'      => $quarantineOrLostCount,
+                'percentage' => $pct($quarantineOrLostCount),
             ],
             'last_audit' => Collection::latest('updated_at')->value('updated_at')
                 ? Carbon::parse(Collection::latest('updated_at')->value('updated_at'))->isoFormat('D MMMM Y')
@@ -204,10 +224,13 @@ class DashboardController extends Controller
         $topLoansQuery = DB::table('loans')
             ->join('collections', 'loans.collection_id', '=', 'collections.id')
             ->join('catalogs', 'collections.catalog_id', '=', 'catalogs.id')
+            // Hanya peminjaman nyata pada bulan berjalan (reservasi batal/kedaluwarsa tidak dihitung)
+            ->whereIn('loans.status', ['BORROWED', 'RETURNED', 'OVERDUE'])
+            ->whereBetween('loans.loan_date', [now()->startOfMonth(), now()->endOfMonth()])
             ->select('catalogs.id', 'catalogs.title', 'catalogs.catalog_call_number', 'catalogs.ddc_number', DB::raw('COUNT(loans.id) as loan_count'))
             ->groupBy('catalogs.id', 'catalogs.title', 'catalogs.catalog_call_number', 'catalogs.ddc_number')
             ->orderByDesc('loan_count')
-            ->limit(5)
+            ->limit(3)
             ->get();
 
         $topBooks = [];
@@ -226,25 +249,6 @@ class DashboardController extends Controller
             }
         }
 
-        // Jika data peminjaman belum banyak, lengkapi dengan katalog terpopuler/eksemplar terbanyak
-        if (count($topBooks) < 3) {
-            $fallbackCatalogs = Catalog::orderByDesc('total_copies')->take(3)->get();
-            $rank = 1;
-            $topBooks = [];
-            foreach ($fallbackCatalogs as $fc) {
-                $callNo = $fc->catalog_call_number ?: ($fc->ddc_number ? $fc->ddc_number . ' BLL' : 'BLL-' . str_pad($fc->id, 4, '0', STR_PAD_LEFT));
-                $copies = max($fc->total_copies ?? 1, 1);
-                $topBooks[] = [
-                    'rank'       => $rank,
-                    'title'      => $fc->title,
-                    'callNo'     => $callNo,
-                    'loans'      => "{$copies} Eksemplar",
-                    'badgeClass' => $rank === 1 ? 'bg-[#2563EB] text-white' : 'bg-[#DBEAFE] text-[#1D4ED8]',
-                ];
-                $rank++;
-            }
-        }
-
         // 6. Problem Members & Circulation Cases Stats (Keranjang Anggota Bermasalah)
         $totalProblemCases = \App\Models\MemberCart::count();
         $activeProblemCases = \App\Models\MemberCart::where('is_resolved', false)->count();
@@ -252,7 +256,7 @@ class DashboardController extends Controller
         $problemMembersAll = \App\Models\MemberCart::distinct('member_id')->count('member_id');
 
         $problemByCategory = [
-            'umum' => \App\Models\MemberCart::whereHas('member', function ($q) {
+            'umum' => \App\Models\MemberCart::where('is_resolved', false)->whereHas('member', function ($q) {
                 $q->where(function ($sq) {
                     $sq->whereNull('job_category')
                        ->orWhere('job_category', 'like', '%UMUM%')
@@ -261,10 +265,10 @@ class DashboardController extends Controller
                        ->orWhere('job_category', 'like', '%SWASTA%');
                 });
             })->count(),
-            'pelajar' => \App\Models\MemberCart::whereHas('member', function ($q) {
+            'pelajar' => \App\Models\MemberCart::where('is_resolved', false)->whereHas('member', function ($q) {
                 $q->where('job_category', 'like', '%PELAJAR%');
             })->count(),
-            'mahasiswa' => \App\Models\MemberCart::whereHas('member', function ($q) {
+            'mahasiswa' => \App\Models\MemberCart::where('is_resolved', false)->whereHas('member', function ($q) {
                 $q->where('job_category', 'like', '%MAHASISWA%');
             })->count(),
         ];

@@ -20,7 +20,9 @@ class MemberManagementController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Member::query();
+        $query = Member::with(['memberCarts' => function ($q) {
+            $q->where('is_resolved', false);
+        }]);
 
         // Search Keyword
         if ($request->filled('search')) {
@@ -44,28 +46,28 @@ class MemberManagementController extends Controller
             }
         }
 
-        // Filter Status
-        if ($request->filled('status') && $request->status !== 'all') {
-            $status = strtolower(trim($request->status));
-
-            if ($status === 'aktif') {
-                // Anggota aktif: bukan yang dibekukan / bermasalah (status NULL ikut dianggap aktif)
-                $query->where(function ($q) {
-                    $q->whereNull('status')
-                      ->orWhere(function ($q2) {
-                          $q2->where('status', 'not like', '%dibekukan%')
-                             ->where('status', 'not like', '%bermasalah%');
-                      });
-                });
-            } elseif ($status === 'bermasalah') {
-                $query->where(function ($q) {
-                    $q->where('status', 'like', '%dibekukan%')
-                      ->orWhere('status', 'like', '%bermasalah%');
-                });
-            } else {
-                // Nilai status persis, mis. "Aktif Bebas Pustaka"
-                $query->where('status', $request->status);
-            }
+        // Filter Status Keanggotaan & Kasus Bermasalah
+        // Default: Sembunyikan anggota bermasalah agar langsung hilang dari Entri Anggota dan masuk ke Keranjang Bermasalah
+        $statusFilter = $request->get('status', 'aktif');
+        if (empty($statusFilter) || in_array(strtolower($statusFilter), ['aktif', 'aktif bebas pustaka'])) {
+            $query->where(function ($q) {
+                $q->where('status', 'like', 'aktif%')
+                  ->orWhereNull('status');
+            })->where('status', 'not like', '%dibekukan%')
+              ->where('status', 'not like', '%bermasalah%')
+              ->whereDoesntHave('memberCarts', function ($cq) {
+                  $cq->where('is_resolved', false);
+              });
+        } elseif (in_array(strtolower($statusFilter), ['bermasalah', 'dibekukan', 'akses dibekukan', 'keranjang'])) {
+            $query->where(function ($q) {
+                $q->where('status', 'like', '%dibekukan%')
+                  ->orWhere('status', 'like', '%bermasalah%')
+                  ->orWhereHas('memberCarts', function ($cq) {
+                      $cq->where('is_resolved', false);
+                  });
+            });
+        } elseif ($statusFilter !== 'all') {
+            $query->where('status', $statusFilter);
         }
 
         // Sorting
@@ -89,6 +91,13 @@ class MemberManagementController extends Controller
         $umumCount = Member::where('job_category', 'UMUM')->count();
         $pelajarCount = Member::where('job_category', 'PELAJAR')->count();
         $mahasiswaCount = Member::where('job_category', 'MAHASISWA')->count();
+        $problemMembersCount = Member::where(function ($q) {
+            $q->where('status', 'like', '%dibekukan%')
+              ->orWhere('status', 'like', '%bermasalah%')
+              ->orWhereHas('memberCarts', function ($cq) {
+                  $cq->where('is_resolved', false);
+              });
+        })->distinct()->count();
 
         $calcPercent = function ($count, $total) {
             if ($total <= 0) return '0.0%';
@@ -100,13 +109,14 @@ class MemberManagementController extends Controller
             'message' => 'Data anggota berhasil diambil.',
             'data'    => MemberResource::collection($members)->response()->getData(true),
             'stats'   => [
-                'total_members'    => $totalMembers,
-                'umum_count'       => $umumCount,
-                'umum_percent'     => $calcPercent($umumCount, $totalMembers),
-                'pelajar_count'    => $pelajarCount,
-                'pelajar_percent'  => $calcPercent($pelajarCount, $totalMembers),
-                'mahasiswa_count'  => $mahasiswaCount,
-                'mahasiswa_percent'=> $calcPercent($mahasiswaCount, $totalMembers),
+                'total_members'         => $totalMembers,
+                'problem_members_count' => $problemMembersCount,
+                'umum_count'            => $umumCount,
+                'umum_percent'          => $calcPercent($umumCount, $totalMembers),
+                'pelajar_count'         => $pelajarCount,
+                'pelajar_percent'       => $calcPercent($pelajarCount, $totalMembers),
+                'mahasiswa_count'       => $mahasiswaCount,
+                'mahasiswa_percent'     => $calcPercent($mahasiswaCount, $totalMembers),
             ],
             'next_member_no' => Member::generateAtlasMemberNo(),
         ]);

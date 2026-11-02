@@ -64,27 +64,13 @@ class ProblemCartController extends Controller
             });
         }
 
-        // 4. Filter Status Penanganan
+        // 4. Filter Status Penanganan (Hanya Akses Dibekukan atau Selesai)
         if ($request->filled('status') && $request->status !== 'all' && $request->status !== 'ALL') {
             $status = strtoupper(trim($request->status));
-            if ($status === 'BELUM_SELESAI' || $status === 'UNRESOLVED') {
+            if ($status === 'BELUM_SELESAI' || $status === 'UNRESOLVED' || $status === 'AKSES_DIBEKUKAN') {
                 $query->where('is_resolved', false);
             } elseif ($status === 'SELESAI' || $status === 'RESOLVED') {
                 $query->where('is_resolved', true);
-            } elseif ($status === 'MENUNGGU_KONFIRMASI') {
-                $query->where('action_status', 'MENUNGGU_KONFIRMASI');
-            } elseif ($status === 'CICILAN' || $status === 'DALAM_MEDIASI') {
-                $query->where(function ($sq) {
-                    $sq->where('action_status', 'DALAM_MEDIASI')
-                      ->orWhere(function ($q) {
-                          $q->where('paid_amount', '>', 0)
-                            ->whereColumn('paid_amount', '<', 'fine_amount');
-                      });
-                });
-            } elseif ($status === 'AKSES_DIBEKUKAN') {
-                $query->where('action_status', 'AKSES_DIBEKUKAN');
-            } elseif ($status === 'PERINGATAN_2') {
-                $query->where('action_status', 'PERINGATAN_2');
             } else {
                 $query->where('action_status', $status);
             }
@@ -121,23 +107,13 @@ class ProblemCartController extends Controller
             return number_format(($count / $total) * 100, 1) . '%';
         };
 
-        // Status counts
+        // Status counts (Akses tindakan hanya Akses Dibekukan dan Selesai)
         $unresolvedCount = MemberCart::where('is_resolved', false)->count();
-        $awaitingConfirmationCount = MemberCart::where('action_status', 'MENUNGGU_KONFIRMASI')->count();
-        $installmentCount = MemberCart::where(function ($q) {
-            $q->where('action_status', 'DALAM_MEDIASI')
-              ->orWhere(function ($sq) {
-                  $sq->where('paid_amount', '>', 0)
-                     ->whereColumn('paid_amount', '<', 'fine_amount');
-              });
-        })->count();
-        $suspendedCount = MemberCart::where('action_status', 'AKSES_DIBEKUKAN')->count();
         $resolvedCount = MemberCart::where('is_resolved', true)->count();
 
         // Problem type counts
         $bukuHilangCount = MemberCart::where('problem_type', 'BUKU_HILANG')->count();
-        $telatCount = MemberCart::where('problem_type', 'TELAT')->count();
-        $dendaCount = MemberCart::where('problem_type', 'DENDA_MENUMPUK')->count();
+        $telatCount = MemberCart::whereIn('problem_type', ['TELAT', 'DENDA_MENUMPUK'])->count();
         $rusakCount = MemberCart::where('problem_type', 'KOLEKSI_RUSAK')->count();
         $anomaliCount = MemberCart::where('problem_type', 'ANOMALI_IDENTITAS')->count();
 
@@ -158,16 +134,13 @@ class ProblemCartController extends Controller
                 'status_breakdown'      => [
                     'all'                   => $totalCases,
                     'unresolved'            => $unresolvedCount,
-                    'awaiting_confirmation' => $awaitingConfirmationCount,
-                    'installment'           => $installmentCount,
-                    'suspended'             => $suspendedCount,
+                    'suspended'             => $unresolvedCount,
                     'resolved'              => $resolvedCount,
                 ],
                 'problem_type_breakdown'=> [
                     'all'            => $totalCases,
                     'buku_hilang'    => $bukuHilangCount,
                     'telat'          => $telatCount,
-                    'denda_menumpuk' => $dendaCount,
                     'koleksi_rusak'  => $rusakCount,
                     'anomali'        => $anomaliCount,
                 ],
@@ -267,8 +240,8 @@ class ProblemCartController extends Controller
             'item_call_number'   => $itemCallNo,
             'item_barcode'       => $itemBarcode,
             'description'        => $validated['description'] ?? null,
-            'fine_amount'        => $validated['fine_amount'] ?? 0,
-            'paid_amount'        => $validated['paid_amount'] ?? 0,
+            'fine_amount'        => 0, // Tidak ada denda uang
+            'paid_amount'        => 0,
             'handled_by'         => $officer,
             'action_status'      => $actionStatus,
             'action_notes'       => $validated['action_notes'] ?? null,
@@ -278,12 +251,10 @@ class ProblemCartController extends Controller
             'is_resolved'        => false,
         ]);
 
-        // Perbarui status anggota di tabel members jika tindakan berupa pembekuan hak pinjam
-        if ($actionStatus === 'AKSES_DIBEKUKAN') {
-            $member = Member::find($validated['member_id']);
-            if ($member && !str_contains(strtolower($member->status), 'dibekukan')) {
-                $member->update(['status' => 'Akses Dibekukan']);
-            }
+        // Perbarui status anggota di tabel members menjadi Akses Dibekukan
+        $member = Member::find($validated['member_id']);
+        if ($member) {
+            $member->update(['status' => 'Akses Dibekukan']);
         }
 
         $cart->load(['member', 'loan', 'collection.catalog']);
@@ -653,11 +624,11 @@ class ProblemCartController extends Controller
                     'item_call_number'   => $loan->collection?->exemplar_call_number ?: $loan->collection?->catalog?->catalog_call_number,
                     'item_barcode'       => $loan->collection?->barcode_no,
                     'description'        => "Keterlambatan pengembalian buku melewati tanggal jatuh tempo ({$loan->due_date->format('d/m/Y')}).",
-                    'fine_amount'        => $calculatedFine,
+                    'fine_amount'        => 0,
                     'paid_amount'        => 0,
                     'handled_by'         => 'Sistem Otomasi Sirkulasi',
-                    'action_status'      => $days > 14 ? 'PERINGATAN_2' : 'PERINGATAN_1',
-                    'action_notes'       => "Surat Peringatan Keterlambatan {$days} Hari",
+                    'action_status'      => 'AKSES_DIBEKUKAN',
+                    'action_notes'       => "Akses peminjaman dibekukan (Telat {$days} Hari)",
                     'reported_date'      => $loan->due_date->format('Y-m-d'),
                     'late_duration_text' => "Telat {$days} Hari",
                     'followup_history'   => [
@@ -666,12 +637,16 @@ class ProblemCartController extends Controller
                             'date'      => Carbon::now()->translatedFormat('d F Y, H:i'),
                             'officer'   => 'Sistem Otomasi Sirkulasi',
                             'action'    => 'Deteksi Keterlambatan Otomatis',
-                            'status'    => 'PERINGATAN',
-                            'notes'     => "Terlambat {$days} hari sejak jatuh tempo.",
+                            'status'    => 'AKSES_DIBEKUKAN',
+                            'notes'     => "Terlambat {$days} hari sejak jatuh tempo. Akses pinjam dibekukan.",
                         ]
                     ],
                     'is_resolved'        => false,
                 ]);
+
+                if ($loan->member) {
+                    $loan->member->update(['status' => 'Akses Dibekukan']);
+                }
 
                 $newCases++;
             }
@@ -701,7 +676,6 @@ class ProblemCartController extends Controller
                     ->first();
 
                 if (!$existing) {
-                    $fine = (float) ($col->price ?: 75000);
                     MemberCart::create([
                         'member_id'          => $lastLoan->member_id,
                         'loan_id'            => $lastLoan->id,
@@ -711,11 +685,11 @@ class ProblemCartController extends Controller
                         'item_call_number'   => $col->exemplar_call_number ?: $col->catalog?->catalog_call_number,
                         'item_barcode'       => $col->barcode_no,
                         'description'        => $col->quarantine_notes ?: ($col->quarantine_reason ?: "Koleksi eksemplar {$col->barcode_no} tercatat dalam kondisi {$col->physical_condition}."),
-                        'fine_amount'        => $fine,
+                        'fine_amount'        => 0,
                         'paid_amount'        => 0,
                         'handled_by'         => 'Petugas Karantina & Sirkulasi',
                         'action_status'      => 'AKSES_DIBEKUKAN',
-                        'action_notes'       => $isLost ? 'Menunggu buku pengganti' : 'Sanksi: Tidak Boleh Pinjam',
+                        'action_notes'       => $isLost ? 'Menunggu buku pengganti' : 'Akses pinjam dibekukan sementara',
                         'reported_date'      => Carbon::today()->format('Y-m-d'),
                         'late_duration_text' => $isLost ? 'Buku Hilang' : 'Koleksi Rusak Berat',
                         'followup_history'   => [
@@ -725,11 +699,13 @@ class ProblemCartController extends Controller
                                 'officer'   => 'Petugas Karantina',
                                 'action'    => 'Pencatatan dari Pemeriksaan Fisik',
                                 'status'    => 'AKSES_DIBEKUKAN',
-                                'notes'     => "Eksemplar masuk status {$col->physical_condition}.",
+                                'notes'     => "Eksemplar masuk status {$col->physical_condition}. Akses peminjaman dibekukan.",
                             ]
                         ],
                         'is_resolved'        => false,
                     ]);
+
+                    $lastLoan->member->update(['status' => 'Akses Dibekukan']);
 
                     $newCases++;
                 }

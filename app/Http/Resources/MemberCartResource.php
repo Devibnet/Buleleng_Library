@@ -49,25 +49,19 @@ class MemberCartResource extends JsonResource
             ];
         }
 
-        // Format problem type label
+        // Format problem type label (Perpustakaan Bebas Denda Uang)
         $problemTypeLabels = [
             'BUKU_HILANG'       => 'Buku Hilang',
-            'TELAT'             => 'Keterlambatan / Telat',
-            'DENDA_MENUMPUK'    => 'Denda Menumpuk',
+            'TELAT'             => 'Keterlambatan Pengembalian',
+            'DENDA_MENUMPUK'    => 'Keterlambatan Berulang',
             'KOLEKSI_RUSAK'     => 'Koleksi Rusak Berat',
             'ANOMALI_IDENTITAS' => 'Anomali NIK / Ganda',
-            'LAINNYA'           => 'Pelanggaran Lainnya',
+            'LAINNYA'           => 'Pelanggaran Tata Tertib',
         ];
 
-        // Format action status label
-        $statusLabels = [
-            'AKSES_DIBEKUKAN'      => 'Akses Dibekukan',
-            'PERINGATAN_2'         => 'Peringatan ke-2',
-            'PERINGATAN_1'         => 'Peringatan ke-1',
-            'DALAM_MEDIASI'        => 'Dalam Mediasi',
-            'MENUNGGU_KONFIRMASI'  => 'Menunggu Konfirmasi',
-            'SELESAI'              => 'Selesai / Teratasi',
-        ];
+        // Format action status label (Hanya Akses Dibekukan atau Selesai)
+        $actualStatus = $this->is_resolved ? 'SELESAI' : 'AKSES_DIBEKUKAN';
+        $actualStatusLabel = $this->is_resolved ? 'Selesai / Teratasi' : 'Akses Dibekukan';
 
         $reportedDateFormatted = null;
         if ($this->reported_date) {
@@ -90,13 +84,13 @@ class MemberCartResource extends JsonResource
             'item_call_number'       => $this->item_call_number,
             'item_barcode'           => $this->item_barcode,
             'description'            => $this->description,
-            'fine_amount'            => $fine,
-            'paid_amount'            => $paid,
-            'remaining_amount'       => $remaining,
-            'remaining_debt'         => $remaining,
+            'fine_amount'            => 0,
+            'paid_amount'            => 0,
+            'remaining_amount'       => 0,
+            'remaining_debt'         => 0,
             'handled_by'             => $this->handled_by ?: 'Petugas Sirkulasi',
-            'action_status'          => $this->action_status,
-            'action_status_label'    => $statusLabels[$this->action_status] ?? $this->action_status,
+            'action_status'          => $actualStatus,
+            'action_status_label'    => $actualStatusLabel,
             'action_notes'           => $this->action_notes,
             'reported_date'          => $this->reported_date ? Carbon::parse($this->reported_date)->format('Y-m-d') : null,
             'reported_date_formatted'=> $reportedDateFormatted,

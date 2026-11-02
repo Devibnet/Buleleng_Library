@@ -50,11 +50,16 @@ class MemberManagementController extends Controller
         // Default: Sembunyikan anggota bermasalah agar langsung hilang dari Entri Anggota dan masuk ke Keranjang Bermasalah
         $statusFilter = $request->get('status', 'aktif');
         if (empty($statusFilter) || in_array(strtolower($statusFilter), ['aktif', 'aktif bebas pustaka'])) {
+            // Status kosong (NULL) dianggap aktif. Pengecekan "not like" dimasukkan ke dalam
+            // grup yang sama, karena NULL NOT LIKE '...' di SQL tidak pernah bernilai benar.
             $query->where(function ($q) {
-                $q->where('status', 'like', 'aktif%')
-                  ->orWhereNull('status');
-            })->where('status', 'not like', '%dibekukan%')
-              ->where('status', 'not like', '%bermasalah%')
+                $q->whereNull('status')
+                  ->orWhere(function ($q2) {
+                      $q2->where('status', 'like', 'aktif%')
+                         ->where('status', 'not like', '%dibekukan%')
+                         ->where('status', 'not like', '%bermasalah%');
+                  });
+            })
               ->whereDoesntHave('memberCarts', function ($cq) {
                   $cq->where('is_resolved', false);
               });

@@ -175,9 +175,9 @@ class QuarantineController extends Controller
         $paginated = $allItems->slice(($page - 1) * $perPage, $perPage)->values();
 
         // Calculate metrics
-        $totalQuarantine = Collection::where('is_quarantine', true)
-            ->orWhere('availability_status', 'QUARANTINED')
-            ->count() + Catalog::where('is_quarantine', true)->count();
+        // Total unik: eksemplar karantina + judul karantina yang belum terwakili eksemplarnya
+        // (sama dengan jumlah baris di daftar & angka di Dashboard)
+        $totalQuarantine = self::countUniqueQuarantine();
 
         $duplicates = Collection::where('quarantine_reason', 'like', '%duplikasi%')->count()
             + Catalog::where('quarantine_reason', 'like', '%duplikasi%')->count();
@@ -218,6 +218,25 @@ class QuarantineController extends Controller
                 'temporary_deleted'  => $temporaryDeleted,
             ],
         ], 200);
+    }
+
+    /**
+     * Jumlah item karantina tanpa duplikasi: setiap eksemplar karantina dihitung satu,
+     * ditambah judul karantina yang tidak punya eksemplar karantina di daftar.
+     */
+    public static function countUniqueQuarantine(): int
+    {
+        $isQuarantinedCollection = function ($q) {
+            $q->where('is_quarantine', true)
+              ->orWhere('availability_status', 'QUARANTINED');
+        };
+
+        $collections = Collection::where($isQuarantinedCollection)->count();
+        $catalogsOnly = Catalog::where('is_quarantine', true)
+            ->whereDoesntHave('collections', $isQuarantinedCollection)
+            ->count();
+
+        return $collections + $catalogsOnly;
     }
 
     /**

@@ -48,9 +48,9 @@ class DashboardController extends Controller
             ->count();
         $borrowedCollections = Collection::where('availability_status', 'BORROWED')->count();
 
-        $quarantineCatalogs = Catalog::where('is_quarantine', true)->count();
-        $quarantineCollections = Collection::where('is_quarantine', true)->count();
-        $totalQuarantine = $quarantineCatalogs + $quarantineCollections;
+        // Sama dengan jumlah baris di halaman Karantina Koleksi (tanpa menghitung dua kali
+        // judul yang eksemplarnya sudah tercantum)
+        $totalQuarantine = QuarantineController::countUniqueQuarantine();
 
         $missingDdc = Catalog::where(function ($q) {
             $q->whereNull('ddc_number')->orWhere('ddc_number', '');

@@ -190,6 +190,54 @@ class ProfileController extends Controller
             ], 401);
         }
 
+        $isGoogleAccount = ! empty($member->google_id);
+
+        // 1. Proteksi Email Akun Google: Akun SSO Google tidak boleh mengubah email
+        if ($isGoogleAccount && $request->has('email')) {
+            if (strtolower(trim((string) $request->email)) !== strtolower((string) $member->email)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Alamat email akun Google terhubung secara permanen dan tidak dapat diubah.',
+                ], 422);
+            }
+        }
+
+        // 2. Proteksi Nama Lengkap Resmi: Memerlukan verifikasi fisik KTP di loket
+        if (! empty($member->name) && $request->has('name') && trim((string) $request->name) !== trim((string) $member->name)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Perubahan nama lengkap resmi memerlukan verifikasi identitas (KTP/KIA) langsung oleh petugas di loket perpustakaan.',
+            ], 422);
+        }
+
+        // 3. Proteksi Alamat Sesuai KTP: Memerlukan verifikasi dokumen fisik di loket
+        if (! empty($member->ktp_address) && $request->has('ktp_address') && trim((string) $request->ktp_address) !== trim((string) $member->ktp_address)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Perubahan alamat sesuai KTP memerlukan verifikasi dokumen identitas resmi langsung oleh petugas di loket perpustakaan.',
+            ], 422);
+        }
+
+        // 4. Proteksi Tempat Lahir Resmi (TTL): Sesuai KTP/Akta
+        if (! empty($member->place_of_birth) && $request->has('place_of_birth') && trim((string) $request->place_of_birth) !== trim((string) $member->place_of_birth)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Perubahan tempat lahir resmi memerlukan verifikasi identitas (KTP/Akta) langsung oleh petugas di loket perpustakaan.',
+            ], 422);
+        }
+
+        // 5. Proteksi Tanggal Lahir Resmi (TTL): Sesuai KTP/Akta
+        $existingDob = $member->date_of_birth ? ($member->date_of_birth instanceof \Carbon\Carbon ? $member->date_of_birth->format('Y-m-d') : substr((string) $member->date_of_birth, 0, 10)) : null;
+        if (! empty($existingDob) && $request->has('date_of_birth') && ! empty($request->date_of_birth)) {
+            $incomingDob = substr(trim((string) $request->date_of_birth), 0, 10);
+            if ($incomingDob !== $existingDob) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Perubahan tanggal lahir resmi memerlukan verifikasi identitas (KTP/Akta) langsung oleh petugas di loket perpustakaan.',
+                ], 422);
+            }
+        }
+
         $validated = $request->validate([
             'name'                => ['required', 'string', 'max:255'],
             'residential_address' => ['nullable', 'string'],

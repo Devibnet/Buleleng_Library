@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\CirculationController;
 use App\Http\Controllers\Api\GuestbookController;
 use App\Http\Controllers\Api\LockerController;
 use App\Http\Controllers\Api\OnsiteReadingController;
+use App\Http\Controllers\Api\V1\Admin\AdminAccessController;
 use App\Http\Controllers\Api\V1\Admin\AdminProfileController;
 use App\Http\Controllers\Api\V1\Admin\BookImportController;
 use App\Http\Controllers\Api\V1\Admin\BookManagementController;
@@ -141,55 +142,30 @@ Route::prefix('v1')->group(function () {
     // 6. Admin Protected Area with RBAC Guard & Role Middleware
     Route::prefix('admin')->group(function () {
 
-        // Modul Manajemen Buku & Dashboard Admin (CRUD, Rekap Database & Import Excel)
+        // =========================================================================
+        // 6A. TINGKAT UMUM: DAPAT DIAKSES SELURUH PETUGAS (operator, admin, super_admin)
+        // Layanan Sirkulasi Loket, Loker, Presensi, Profil Pribadi, dan Pencarian/Cek Data
+        // =========================================================================
         Route::middleware(['auth:sanctum', 'admin.role:operator,admin,super_admin'])->group(function () {
             // Dashboard Admin Otomasi & Statistik
             Route::get('/dashboard', [DashboardController::class, 'index']);
             Route::post('/dashboard/scan', [DashboardController::class, 'scan']);
             Route::post('/dashboard/sync', [DashboardController::class, 'sync']);
 
+            // Read-Only Lookups untuk Loket Sirkulasi
             Route::get('/books', [BookManagementController::class, 'index']);
-            Route::get('/collections', [BookManagementController::class, 'listCollections']);
-            Route::post('/books/import', [BookManagementController::class, 'importExcel']);
-            Route::post('/books/import/prepare', [BookImportController::class, 'prepare']);
-            Route::post('/books/import/{token}/process', [BookImportController::class, 'process']);
-            Route::delete('/books/import/{token}', [BookImportController::class, 'cancel']);
             Route::get('/books/{id}', [BookManagementController::class, 'show']);
-            Route::post('/books', [BookManagementController::class, 'store']);
-            Route::put('/books/{id}', [BookManagementController::class, 'updateCatalog']);
-            Route::delete('/books/{id}', [BookManagementController::class, 'destroyCatalog']);
-            Route::put('/collections/{collection_id}', [BookManagementController::class, 'updateCollection']);
-            Route::delete('/collections/{collection_id}', [BookManagementController::class, 'destroyCollection']);
-
-            // Modul Karantina Koleksi & Sinkronisasi OPAC
-            Route::get('/quarantine', [QuarantineController::class, 'index']);
-            Route::post('/quarantine/move', [QuarantineController::class, 'moveToQuarantine']);
-            Route::post('/quarantine/bulk-restore', [QuarantineController::class, 'bulkRestore']);
-            Route::post('/quarantine/bulk-delete', [QuarantineController::class, 'bulkDestroy']);
-            Route::post('/quarantine/{id}/restore', [QuarantineController::class, 'restore']);
-            Route::post('/quarantine/{id}/validate', [QuarantineController::class, 'validateCatalog']);
-
-            // Modul Manajemen Anggota Admin (CRUD, Search, Filter, Statistik, KTA, Bulk Delete, Export)
-            Route::get('/members/export', [MemberManagementController::class, 'export']);
-            Route::get('/members/next-number', [MemberManagementController::class, 'nextNumber']);
-            Route::post('/members/bulk-delete', [MemberManagementController::class, 'bulkDestroy']);
+            Route::get('/collections', [BookManagementController::class, 'listCollections']);
             Route::get('/members', [MemberManagementController::class, 'index']);
-            Route::post('/members', [MemberManagementController::class, 'store']);
+            Route::get('/members/pending-verifications', [MemberManagementController::class, 'pendingVerifications']);
+            Route::get('/members/next-number', [MemberManagementController::class, 'nextNumber']);
             Route::get('/members/{id}', [MemberManagementController::class, 'show']);
-            Route::put('/members/{id}', [MemberManagementController::class, 'update']);
-            Route::delete('/members/{id}', [MemberManagementController::class, 'destroy']);
-
-            // Modul Keranjang Anggota Bermasalah (Problem Carts)
-            Route::get('/problem-carts', [ProblemCartController::class, 'index']);
-            Route::post('/problem-carts', [ProblemCartController::class, 'store']);
-            Route::post('/problem-carts/sync-circulation', [ProblemCartController::class, 'syncCirculation']);
-            Route::post('/problem-carts/bulk-action', [ProblemCartController::class, 'bulkAction']);
-            Route::get('/problem-carts/{id}', [ProblemCartController::class, 'show']);
-            Route::put('/problem-carts/{id}', [ProblemCartController::class, 'update']);
-            Route::post('/problem-carts/{id}/followup', [ProblemCartController::class, 'followup']);
-            Route::post('/problem-carts/{id}/resolve', [ProblemCartController::class, 'resolve']);
-            Route::delete('/problem-carts/{id}', [ProblemCartController::class, 'destroy']);
             Route::get('/members/{id}/problem-history', [ProblemCartController::class, 'memberHistory']);
+            Route::get('/problem-carts', [ProblemCartController::class, 'index']);
+            Route::get('/problem-carts/{id}', [ProblemCartController::class, 'show']);
+
+            // Matriks Hak Akses (Informasi Peran Sistem)
+            Route::get('/access/permissions-matrix', [AdminAccessController::class, 'permissionsMatrix']);
 
             // Modul Reservasi (Verifikasi Rak & Pengambilan di Loket)
             Route::get('/circulation/reservation-desk', [ReservationDeskController::class, 'index']);
@@ -224,6 +200,67 @@ Route::prefix('v1')->group(function () {
                 Route::get('/', [AdminProfileController::class, 'show']);
                 Route::put('/', [AdminProfileController::class, 'update']);
                 Route::put('/password', [AdminProfileController::class, 'updatePassword']);
+            });
+        });
+
+        // =========================================================================
+        // 6B. TINGKAT PUSTAKAWAN & SUPER ADMIN (admin, super_admin)
+        // Pengelolaan Master Katalog, Karantina Koleksi, Data Anggota, Keranjang Bermasalah
+        // =========================================================================
+        Route::middleware(['auth:sanctum', 'admin.role:admin,super_admin'])->group(function () {
+            // Modul Manajemen Buku & Eksemplar (Mutasi Master)
+            Route::post('/books', [BookManagementController::class, 'store']);
+            Route::put('/books/{id}', [BookManagementController::class, 'updateCatalog']);
+            Route::delete('/books/{id}', [BookManagementController::class, 'destroyCatalog']);
+            Route::put('/collections/{collection_id}', [BookManagementController::class, 'updateCollection']);
+            Route::delete('/collections/{collection_id}', [BookManagementController::class, 'destroyCollection']);
+            Route::post('/books/import', [BookManagementController::class, 'importExcel']);
+            Route::post('/books/import/prepare', [BookImportController::class, 'prepare']);
+            Route::post('/books/import/{token}/process', [BookImportController::class, 'process']);
+            Route::delete('/books/import/{token}', [BookImportController::class, 'cancel']);
+
+            // Modul Karantina Koleksi & Sinkronisasi OPAC
+            Route::get('/quarantine', [QuarantineController::class, 'index']);
+            Route::post('/quarantine/move', [QuarantineController::class, 'moveToQuarantine']);
+            Route::post('/quarantine/bulk-restore', [QuarantineController::class, 'bulkRestore']);
+            Route::post('/quarantine/bulk-delete', [QuarantineController::class, 'bulkDestroy']);
+            Route::post('/quarantine/{id}/restore', [QuarantineController::class, 'restore']);
+            Route::post('/quarantine/{id}/validate', [QuarantineController::class, 'validateCatalog']);
+
+            // Modul Keanggotaan (Mutasi Data & Ekspor)
+            Route::get('/members/export', [MemberManagementController::class, 'export']);
+            Route::post('/members', [MemberManagementController::class, 'store']);
+            Route::put('/members/{id}', [MemberManagementController::class, 'update']);
+            Route::delete('/members/{id}', [MemberManagementController::class, 'destroy']);
+            Route::post('/members/bulk-delete', [MemberManagementController::class, 'bulkDestroy']);
+            Route::post('/members/{id}/approve-ktp', [MemberManagementController::class, 'approveKtp'])->whereNumber('id');
+            Route::post('/members/{id}/reject-ktp', [MemberManagementController::class, 'rejectKtp'])->whereNumber('id');
+
+            // Modul Keranjang Bermasalah (Mutasi & Tindak Lanjut)
+            Route::post('/problem-carts', [ProblemCartController::class, 'store']);
+            Route::post('/problem-carts/sync-circulation', [ProblemCartController::class, 'syncCirculation']);
+            Route::post('/problem-carts/bulk-action', [ProblemCartController::class, 'bulkAction']);
+            Route::put('/problem-carts/{id}', [ProblemCartController::class, 'update']);
+            Route::post('/problem-carts/{id}/followup', [ProblemCartController::class, 'followup']);
+            Route::post('/problem-carts/{id}/resolve', [ProblemCartController::class, 'resolve']);
+            Route::delete('/problem-carts/{id}', [ProblemCartController::class, 'destroy']);
+
+            // Read-Only Petugas & Log Audit untuk Pustakawan
+            Route::get('/access/users', [AdminAccessController::class, 'index']);
+            Route::get('/access/users/{id}', [AdminAccessController::class, 'show'])->whereNumber('id');
+            Route::get('/access/activity-logs', [AdminAccessController::class, 'activityLogs']);
+        });
+
+        // =========================================================================
+        // 6C. TINGKAT SUPER ADMIN MUTLAK (super_admin)
+        // Penambahan, Pengeditan, Penonaktifan, dan Penghapusan Akun Petugas Perpustakaan
+        // =========================================================================
+        Route::middleware(['auth:sanctum', 'admin.role:super_admin'])->group(function () {
+            Route::prefix('access')->group(function () {
+                Route::post('/users', [AdminAccessController::class, 'store']);
+                Route::put('/users/{id}', [AdminAccessController::class, 'update'])->whereNumber('id');
+                Route::patch('/users/{id}/toggle-status', [AdminAccessController::class, 'toggleStatus'])->whereNumber('id');
+                Route::delete('/users/{id}', [AdminAccessController::class, 'destroy'])->whereNumber('id');
             });
         });
 

@@ -31,8 +31,12 @@ class Member extends Authenticatable
         'email',
         'password',
         'photo_path',
+        'ktp_photo_path',
         'status',
         'valid_until',
+        'ktp_verified_at',
+        'ktp_verified_by',
+        'verification_rejection_reason',
         'google_id',
         'avatar',
     ];
@@ -44,6 +48,7 @@ class Member extends Authenticatable
 
     protected $appends = [
         'photo_url',
+        'ktp_photo_url',
     ];
 
     /**
@@ -70,6 +75,27 @@ class Member extends Authenticatable
     }
 
     /**
+     * Get the resolved, absolute public URL for the member's KTP photo during verification.
+     */
+    public function getKtpPhotoUrlAttribute(): ?string
+    {
+        if (! $this->ktp_photo_path) {
+            return null;
+        }
+
+        if (str_starts_with($this->ktp_photo_path, 'http://') || str_starts_with($this->ktp_photo_path, 'https://')) {
+            return $this->ktp_photo_path;
+        }
+
+        $cleaned = ltrim($this->ktp_photo_path, '/');
+        if (str_starts_with($cleaned, 'storage/')) {
+            return asset($cleaned);
+        }
+
+        return asset('storage/' . $cleaned);
+    }
+
+    /**
      * Get the attributes that should be cast.
      *
      * @return array<string, string>
@@ -79,6 +105,7 @@ class Member extends Authenticatable
         return [
             'date_of_birth' => 'date',
             'valid_until' => 'date',
+            'ktp_verified_at' => 'datetime',
             'password' => 'hashed',
         ];
     }

@@ -71,6 +71,10 @@ class MemberManagementController extends Controller
                       $cq->where('is_resolved', false);
                   });
             });
+        } elseif (in_array(strtolower($statusFilter), ['verifikasi', 'menunggu verifikasi', 'pending'])) {
+            $query->where('status', 'Menunggu Verifikasi');
+        } elseif (in_array(strtolower($statusFilter), ['ditolak', 'rejected'])) {
+            $query->where('status', 'Ditolak');
         } elseif ($statusFilter !== 'all') {
             $query->where('status', $statusFilter);
         }
@@ -104,6 +108,8 @@ class MemberManagementController extends Controller
               });
         })->distinct()->count();
 
+        $pendingVerificationsCount = Member::where('status', 'Menunggu Verifikasi')->count();
+
         $calcPercent = function ($count, $total) {
             if ($total <= 0) return '0.0%';
             return number_format(($count / $total) * 100, 1) . '%';
@@ -114,14 +120,15 @@ class MemberManagementController extends Controller
             'message' => 'Data anggota berhasil diambil.',
             'data'    => MemberResource::collection($members)->response()->getData(true),
             'stats'   => [
-                'total_members'         => $totalMembers,
-                'problem_members_count' => $problemMembersCount,
-                'umum_count'            => $umumCount,
-                'umum_percent'          => $calcPercent($umumCount, $totalMembers),
-                'pelajar_count'         => $pelajarCount,
-                'pelajar_percent'       => $calcPercent($pelajarCount, $totalMembers),
-                'mahasiswa_count'       => $mahasiswaCount,
-                'mahasiswa_percent'     => $calcPercent($mahasiswaCount, $totalMembers),
+                'total_members'              => $totalMembers,
+                'problem_members_count'      => $problemMembersCount,
+                'pending_verifications_count' => $pendingVerificationsCount,
+                'umum_count'                 => $umumCount,
+                'umum_percent'               => $calcPercent($umumCount, $totalMembers),
+                'pelajar_count'              => $pelajarCount,
+                'pelajar_percent'            => $calcPercent($pelajarCount, $totalMembers),
+                'mahasiswa_count'            => $mahasiswaCount,
+                'mahasiswa_percent'          => $calcPercent($mahasiswaCount, $totalMembers),
             ],
             'next_member_no' => Member::generateAtlasMemberNo(),
         ]);
@@ -154,11 +161,14 @@ class MemberManagementController extends Controller
             'ktp_address'         => ['required', 'string'],
             'residential_address' => ['required', 'string'],
             'gender'              => ['required', 'string', 'in:L,P'],
-            'nik'                 => ['nullable', 'string', 'max:30'],
+            'nik'                 => ['required', 'digits:16', 'unique:members,nik'],
             'email'               => ['nullable', 'email', 'max:255', 'unique:members,email'],
             'photo'               => ['nullable'],
             'status'              => ['nullable', 'string', 'max:50'],
         ], [
+            'nik.required'                 => 'Nomor Induk Kependudukan (NIK) wajib diisi.',
+            'nik.digits'                   => 'NIK harus berjumlah tepat 16 digit angka.',
+            'nik.unique'                   => 'NIK ini sudah terdaftar sebagai anggota perpustakaan.',
             'name.required'                => 'Nama lengkap wajib diisi sesuai identitas resmi.',
             'gender.required'              => 'Jenis kelamin wajib dipilih (Laki-Laki atau Perempuan).',
             'gender.in'                    => 'Pilihan jenis kelamin harus L (Laki-Laki) atau P (Perempuan).',
@@ -246,8 +256,11 @@ class MemberManagementController extends Controller
             'ktp_address'         => $validated['ktp_address'],
             'residential_address' => $validated['residential_address'],
             'photo_path'          => $photoPath,
+            'ktp_photo_path'      => null,
             'status'              => $validated['status'] ?? 'Aktif Bebas Pustaka',
             'valid_until'         => $validUntil,
+            'ktp_verified_at'     => now(),
+            'ktp_verified_by'     => auth()->id(),
         ]);
 
         return response()->json([
@@ -299,10 +312,13 @@ class MemberManagementController extends Controller
             'phone_number'        => ['required', 'string', 'max:30'],
             'ktp_address'         => ['required', 'string'],
             'residential_address' => ['required', 'string'],
-            'nik'                 => ['nullable', 'string', 'max:30'],
+            'nik'                 => ['required', 'digits:16', 'unique:members,nik,' . $id],
             'email'               => ['nullable', 'email', 'max:255', 'unique:members,email,' . $id],
             'status'              => ['nullable', 'string', 'max:50'],
         ], [
+            'nik.required'                 => 'Nomor Induk Kependudukan (NIK) wajib diisi.',
+            'nik.digits'                   => 'NIK harus berjumlah tepat 16 digit angka.',
+            'nik.unique'                   => 'NIK ini sudah terdaftar sebagai anggota perpustakaan.',
             'name.required'                => 'Nama lengkap wajib diisi sesuai identitas resmi.',
             'gender.required'              => 'Jenis kelamin wajib dipilih (Laki-Laki atau Perempuan).',
             'gender.in'                    => 'Pilihan jenis kelamin harus L (Laki-Laki) atau P (Perempuan).',
@@ -531,5 +547,121 @@ class MemberManagementController extends Controller
         };
 
         return response()->stream($callback, 200, $headers);
+    }
+
+    /**
+     * Ambil antrean pendaftaran anggota online yang berstatus 'Menunggu Verifikasi'
+     */
+    public function pendingVerifications(Request $request): JsonResponse
+    {
+        $query = Member::where('status', 'Menunggu Verifikasi');
+
+        if ($request->filled('search')) {
+            $search = trim($request->search);
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                  ->orWhere('nik', 'like', "%{$search}%")
+                  ->orWhere('email', 'like', "%{$search}%")
+                  ->orWhere('member_no', 'like', "%{$search}%")
+                  ->orWhere('phone_number', 'like', "%{$search}%");
+            });
+        }
+
+        $perPage = (int) $request->get('per_page', 10);
+        if ($perPage < 1) $perPage = 10;
+        if ($perPage > 100) $perPage = 100;
+
+        $members = $query->orderBy('created_at', 'desc')->paginate($perPage);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Daftar verifikasi pendaftaran online berhasil diambil.',
+            'data'    => MemberResource::collection($members)->response()->getData(true),
+            'total_pending' => Member::where('status', 'Menunggu Verifikasi')->count(),
+        ]);
+    }
+
+    /**
+     * Verifikasi & Setujui Pendaftaran Anggota KTP Bali
+     * Berkas foto KTP otomatis dimusnahkan secara permanen dari server storage
+     */
+    public function approveKtp(Request $request, int|string $id): JsonResponse
+    {
+        $member = Member::findOrFail($id);
+
+        // Hapus fisik foto KTP dari storage demi perlindungan privasi UU PDP
+        if (!empty($member->ktp_photo_path)) {
+            $this->purgeKtpPhoto($member->ktp_photo_path);
+        }
+
+        $adminId = auth()->id();
+
+        $member->update([
+            'status'                        => 'Aktif Bebas Pustaka',
+            'ktp_photo_path'                => null,
+            'ktp_verified_at'               => now(),
+            'ktp_verified_by'               => $adminId,
+            'verification_rejection_reason' => null,
+            'valid_until'                   => $member->valid_until ?: now()->addYears(5),
+            'max_loans'                     => 3,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Pendaftaran anggota berhasil disetujui! Foto KTP pemohon telah otomatis dihapus permanen dari server sesuai UU PDP.',
+            'data'    => new MemberResource($member->fresh()),
+        ]);
+    }
+
+    /**
+     * Tolak Pendaftaran Anggota KTP Bali
+     * Berkas foto KTP juga otomatis dihapus permanen dari storage dan alasan penolakan dicatat
+     */
+    public function rejectKtp(Request $request, int|string $id): JsonResponse
+    {
+        $request->validate([
+            'reason' => ['required', 'string', 'max:500'],
+        ], [
+            'reason.required' => 'Alasan penolakan pendaftaran wajib diisi.',
+            'reason.max'      => 'Alasan penolakan maksimal 500 karakter.',
+        ]);
+
+        $member = Member::findOrFail($id);
+
+        // Hapus fisik foto KTP dari storage jika ada
+        if (!empty($member->ktp_photo_path)) {
+            $this->purgeKtpPhoto($member->ktp_photo_path);
+        }
+
+        $adminId = auth()->id();
+
+        $member->update([
+            'status'                        => 'Ditolak',
+            'ktp_photo_path'                => null,
+            'verification_rejection_reason' => $request->reason,
+            'ktp_verified_at'               => now(),
+            'ktp_verified_by'               => $adminId,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Pendaftaran anggota berhasil ditolak. Berkas foto KTP pemohon telah otomatis dimusnahkan dari server.',
+            'data'    => new MemberResource($member->fresh()),
+        ]);
+    }
+
+    /**
+     * Helper untuk menghapus file foto KTP dari storage disk public
+     */
+    private function purgeKtpPhoto(?string $path): void
+    {
+        if (empty($path)) {
+            return;
+        }
+
+        $relativePath = preg_replace('#^/?storage/#', '', $path);
+        if (Storage::disk('public')->exists($relativePath)) {
+            Storage::disk('public')->delete($relativePath);
+        }
     }
 }

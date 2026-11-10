@@ -48,6 +48,7 @@ class MemberRegisterController extends Controller
 
         // Validasi seluruh inputan form wajib
         $validated = $request->validate([
+            'nik'                 => ['required', 'digits:16', 'unique:members,nik'],
             'name'                => ['required', 'string', 'max:255'],
             'place_of_birth'      => ['required', 'string', 'max:255'],
             'date_of_birth'       => ['required', 'date', 'before:today'],
@@ -57,7 +58,11 @@ class MemberRegisterController extends Controller
             'institution_name'    => ['required', 'string', 'max:255'],
             'phone_number'        => ['required', 'string', 'max:25'],
             'photo'               => ['required', 'image', 'mimes:jpeg,png,jpg', 'max:2048'],
+            'ktp_photo'           => ['required', 'image', 'mimes:jpeg,png,jpg', 'max:2048'],
         ], [
+            'nik.required'                 => 'Nomor Induk Kependudukan (NIK) wajib diisi.',
+            'nik.digits'                   => 'NIK harus berjumlah tepat 16 digit angka.',
+            'nik.unique'                   => 'NIK ini sudah terdaftar sebagai anggota perpustakaan.',
             'name.required'                => 'Nama lengkap wajib diisi.',
             'place_of_birth.required'      => 'Tempat lahir wajib diisi.',
             'date_of_birth.required'       => 'Tanggal lahir wajib diisi.',
@@ -72,6 +77,10 @@ class MemberRegisterController extends Controller
             'photo.image'                  => 'File yang diunggah harus berupa gambar.',
             'photo.mimes'                  => 'Format gambar yang diperbolehkan: jpeg, png, jpg.',
             'photo.max'                    => 'Ukuran maksimal file gambar adalah 2MB.',
+            'ktp_photo.required'           => 'Foto dokumen identitas resmi (e-KTP / KIA / Kartu Pelajar / Kartu Keluarga) wajib diunggah untuk verifikasi keanggotaan online.',
+            'ktp_photo.image'              => 'Berkas foto dokumen identitas harus berupa gambar.',
+            'ktp_photo.mimes'              => 'Format gambar identitas yang diperbolehkan: jpeg, png, jpg.',
+            'ktp_photo.max'                => 'Ukuran foto dokumen identitas maksimal 2MB.',
         ]);
 
         // Cek apakah email sudah terdaftar sebelumnya (antisipasi double submit)
@@ -82,26 +91,31 @@ class MemberRegisterController extends Controller
             return redirect('/member/dashboard')->with('info', 'Akun Anda sudah terdaftar sebelumnya.');
         }
 
-        // Handle File Upload
+        // Handle File Upload Pas Foto
         $photoPath = null;
         if ($request->hasFile('photo')) {
-            $file = $request->request->all() ? $request->file('photo') : null; // sanity check
-            if ($file && !$file->isValid()) {
-                return back()
-                    ->withErrors(['photo' => 'File gagal diunggah. Pastikan ukuran gambar tidak melebihi batas (Maks. 2MB).'])
-                    ->withInput();
-            }
-            
-            if ($file) {
-                // Gunakan Storage facade dan hashName, menghindari error getRealPath() di Windows
+            $file = $request->file('photo');
+            if ($file && $file->isValid()) {
                 $filename = $file->hashName();
                 \Illuminate\Support\Facades\Storage::disk('public')->put(
                     'photos/members/' . $filename, 
                     file_get_contents($file->getPathname())
                 );
-                
-                // Format path for storage: url
                 $photoPath = '/storage/photos/members/' . $filename;
+            }
+        }
+
+        // Handle File Upload KTP Bali
+        $ktpPhotoPath = null;
+        if ($request->hasFile('ktp_photo')) {
+            $ktpFile = $request->file('ktp_photo');
+            if ($ktpFile && $ktpFile->isValid()) {
+                $ktpFilename = 'ktp_' . Str::random(24) . '.' . $ktpFile->getClientOriginalExtension();
+                \Illuminate\Support\Facades\Storage::disk('public')->put(
+                    'ktp-verifications/' . $ktpFilename,
+                    file_get_contents($ktpFile->getPathname())
+                );
+                $ktpPhotoPath = '/storage/ktp-verifications/' . $ktpFilename;
             }
         }
 
@@ -111,6 +125,7 @@ class MemberRegisterController extends Controller
         // Simpan data ke tabel members
         $member = Member::create([
             'member_no'           => $memberNo,
+            'nik'                 => $validated['nik'],
             'name'                => $validated['name'],
             'residential_address' => $validated['residential_address'],
             'ktp_address'         => $validated['ktp_address'],
@@ -121,9 +136,12 @@ class MemberRegisterController extends Controller
             'phone_number'        => $validated['phone_number'],
             'email'               => $googleUser['email'],
             'password'            => Hash::make(Str::random(16)),
-            'photo_path'          => $photoPath, // Use uploaded photo
+            'photo_path'          => $photoPath,
+            'ktp_photo_path'      => $ktpPhotoPath,
+            'status'              => 'Menunggu Verifikasi',
+            'max_loans'           => 3,
             'google_id'           => $googleUser['google_id'] ?? null,
-            'avatar'              => $googleUser['photo_path'] ?? null, // Keep original google avatar in avatar col if it exists
+            'avatar'              => $googleUser['photo_path'] ?? null,
         ]);
 
         // Hapus session temporer Google setelah berhasil
@@ -155,6 +173,9 @@ class MemberRegisterController extends Controller
         if (!isset($input['name']) && isset($input['namaLengkap'])) {
             $input['name'] = $input['namaLengkap'];
         }
+        if (!isset($input['nik']) && isset($input['noKtp'])) {
+            $input['nik'] = $input['noKtp'];
+        }
         if (!isset($input['residential_address']) && isset($input['alamatTinggal'])) {
             $input['residential_address'] = $input['alamatTinggal'];
         }
@@ -177,6 +198,17 @@ class MemberRegisterController extends Controller
             $input['job_category'] = strtoupper($input['pekerjaan']);
         } elseif (isset($input['job_category'])) {
             $input['job_category'] = strtoupper($input['job_category']);
+        }
+
+        // Tangkap file upload ke input array agar lolos validasi Validator::make
+        $photoFile = $request->file('photo') ?? $request->file('photo_formal') ?? $request->file('foto') ?? $request->file('fotoFormal');
+        if ($photoFile) {
+            $input['photo'] = $photoFile;
+        }
+
+        $ktpFile = $request->file('ktp_photo') ?? $request->file('ktpPhoto') ?? $request->file('foto_ktp') ?? $request->file('fotoKtp');
+        if ($ktpFile) {
+            $input['ktp_photo'] = $ktpFile;
         }
 
         // Cek jika tempatTanggalLahir dikirim dalam satu string (misal: "Singaraja, 2000-05-15")
@@ -205,11 +237,23 @@ class MemberRegisterController extends Controller
             $emailRule[] = 'unique:members,email';
         }
 
+        $nikRule = ['required', 'string', 'digits:16'];
+        if ($isExistingGoogleOrUpdating) {
+            $nikRule[] = \Illuminate\Validation\Rule::unique('members', 'nik')->ignore($existingMember->id);
+        } else {
+            $nikRule[] = 'unique:members,nik';
+        }
+
         $passwordRule = $isExistingGoogleOrUpdating
             ? ['nullable', 'string', \Illuminate\Validation\Rules\Password::min(8)->mixedCase()->numbers()->symbols()]
             : ['required', 'string', \Illuminate\Validation\Rules\Password::min(8)->mixedCase()->numbers()->symbols()];
 
+        $ktpPhotoRule = ($isExistingGoogleOrUpdating && $existingMember->status === 'Aktif Bebas Pustaka')
+            ? ['nullable', 'image', 'mimes:jpeg,png,jpg', 'max:2048']
+            : ['required', 'image', 'mimes:jpeg,png,jpg', 'max:2048'];
+
         $validator = \Illuminate\Support\Facades\Validator::make($input, [
+            'nik'                 => $nikRule,
             'name'                => ['required', 'string', 'max:255'],
             'email'               => $emailRule,
             'password'            => $passwordRule,
@@ -221,7 +265,11 @@ class MemberRegisterController extends Controller
             'institution_name'    => ['nullable', 'string', 'max:255'],
             'phone_number'        => ['nullable', 'string', 'max:25'],
             'photo'               => ['nullable', 'image', 'mimes:jpeg,png,jpg', 'max:2048'],
+            'ktp_photo'           => $ktpPhotoRule,
         ], [
+            'nik.required'          => 'Nomor Induk Kependudukan (NIK) wajib diisi.',
+            'nik.digits'            => 'NIK harus berjumlah tepat 16 digit angka.',
+            'nik.unique'            => 'NIK ini sudah terdaftar sebagai anggota perpustakaan.',
             'name.required'         => 'Nama lengkap wajib diisi.',
             'email.required'        => 'Email wajib diisi.',
             'email.email'           => 'Format email tidak valid.',
@@ -234,9 +282,13 @@ class MemberRegisterController extends Controller
             'date_of_birth.before'  => 'Tanggal lahir harus sebelum hari ini.',
             'job_category.required' => 'Kategori pekerjaan wajib dipilih.',
             'job_category.in'       => 'Kategori pekerjaan harus salah satu dari: UMUM, PELAJAR, atau MAHASISWA.',
-            'photo.image'           => 'File yang diunggah harus berupa gambar.',
-            'photo.mimes'           => 'Format gambar yang diperbolehkan: jpeg, png, jpg.',
-            'photo.max'             => 'Ukuran maksimal file gambar adalah 2MB.',
+            'photo.image'           => 'File pas foto harus berupa gambar.',
+            'photo.mimes'           => 'Format gambar pas foto yang diperbolehkan: jpeg, png, jpg.',
+            'photo.max'             => 'Ukuran maksimal file pas foto adalah 2MB.',
+            'ktp_photo.required'    => 'Foto dokumen identitas resmi (e-KTP / KIA / Kartu Pelajar / Kartu Keluarga) wajib diunggah untuk verifikasi keanggotaan online.',
+            'ktp_photo.image'       => 'Berkas foto dokumen identitas harus berupa gambar.',
+            'ktp_photo.mimes'       => 'Format gambar identitas yang diperbolehkan: jpeg, png, jpg.',
+            'ktp_photo.max'         => 'Ukuran foto dokumen identitas maksimal 2MB.',
         ]);
 
         if ($validator->fails()) {
@@ -249,20 +301,31 @@ class MemberRegisterController extends Controller
 
         $validated = $validator->validated();
 
-        // Handle File Upload
+        // Handle File Upload Pas Foto
         $photoPath = null;
-        $file = $request->file('photo') ?? $request->file('photo_formal') ?? $request->file('foto');
-        if ($file && $file->isValid()) {
-            $filename = $file->hashName();
+        if ($photoFile && $photoFile->isValid()) {
+            $filename = $photoFile->hashName();
             \Illuminate\Support\Facades\Storage::disk('public')->put(
                 'photos/members/' . $filename,
-                file_get_contents($file->getPathname())
+                file_get_contents($photoFile->getPathname())
             );
             $photoPath = '/storage/photos/members/' . $filename;
         }
 
+        // Handle File Upload KTP Bali
+        $ktpPhotoPath = null;
+        if ($ktpFile && $ktpFile->isValid()) {
+            $ktpFilename = 'ktp_' . Str::random(24) . '.' . $ktpFile->getClientOriginalExtension();
+            \Illuminate\Support\Facades\Storage::disk('public')->put(
+                'ktp-verifications/' . $ktpFilename,
+                file_get_contents($ktpFile->getPathname())
+            );
+            $ktpPhotoPath = '/storage/ktp-verifications/' . $ktpFilename;
+        }
+
         if ($existingMember) {
             $updateData = [
+                'nik'                 => $validated['nik'],
                 'name'                => $validated['name'],
                 'place_of_birth'      => $validated['place_of_birth'] ?? $existingMember->place_of_birth,
                 'date_of_birth'       => $validated['date_of_birth'] ?? $existingMember->date_of_birth,
@@ -271,12 +334,21 @@ class MemberRegisterController extends Controller
                 'job_category'        => $validated['job_category'],
                 'institution_name'    => $validated['institution_name'] ?? $existingMember->institution_name,
                 'phone_number'        => $validated['phone_number'] ?? $existingMember->phone_number,
+                'max_loans'           => 3,
             ];
             if (!empty($validated['password'])) {
                 $updateData['password'] = Hash::make($validated['password']);
             }
             if ($photoPath) {
                 $updateData['photo_path'] = $photoPath;
+            }
+            if ($ktpPhotoPath) {
+                $updateData['ktp_photo_path'] = $ktpPhotoPath;
+                $updateData['status'] = 'Menunggu Verifikasi';
+                $updateData['verification_rejection_reason'] = null;
+            } elseif (empty($existingMember->status) || $existingMember->status === 'Ditolak') {
+                $updateData['status'] = 'Menunggu Verifikasi';
+                $updateData['verification_rejection_reason'] = null;
             }
             if (empty($existingMember->member_no)) {
                 $updateData['member_no'] = Member::generateMemberNo();
@@ -291,6 +363,7 @@ class MemberRegisterController extends Controller
             // Create Member
             $member = Member::create([
                 'member_no'           => $memberNo,
+                'nik'                 => $validated['nik'],
                 'name'                => $validated['name'],
                 'email'               => $validated['email'],
                 'password'            => Hash::make($validated['password']),
@@ -302,6 +375,9 @@ class MemberRegisterController extends Controller
                 'institution_name'    => $validated['institution_name'] ?? null,
                 'phone_number'        => $validated['phone_number'] ?? null,
                 'photo_path'          => $photoPath,
+                'ktp_photo_path'      => $ktpPhotoPath,
+                'status'              => 'Menunggu Verifikasi',
+                'max_loans'           => 3,
             ]);
         }
 
@@ -310,7 +386,7 @@ class MemberRegisterController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Registrasi anggota berhasil! Selamat datang di Perpustakaan Buleleng.',
+            'message' => 'Registrasi anggota berhasil! Akun Anda sedang dalam antrean verifikasi KTP Bali oleh petugas.',
             'token'   => $token,
             'data'    => [
                 'token'  => $token,

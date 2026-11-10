@@ -15,20 +15,62 @@ class AuthController extends Controller
 {
     /**
      * POST /api/auth/member/login
+     * Mendukung login dengan Email, Nomor Anggota (member_no), atau NIK
      */
     public function loginMember(Request $request): JsonResponse
     {
-        $request->validate([
-            'email'    => 'required|email',
-            'password' => 'required|string',
-        ]);
+        $input = $request->all();
+        $identifier = trim($input['identifier'] ?? $input['email'] ?? $input['username'] ?? '');
+        $password = (string) ($input['password'] ?? '');
 
-        $member = Member::where('email', $request->email)->first();
-
-        if (! $member || ! Hash::check($request->password, $member->password)) {
+        if (empty($identifier) || empty($password)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Kredensial email atau password member salah.',
+                'message' => 'No. Anggota / NIK / Email dan kata sandi wajib diisi.',
+            ], 422);
+        }
+
+        // Cari member berdasarkan email, nomor anggota, atau NIK
+        $member = Member::where(function ($q) use ($identifier) {
+            $q->where('email', $identifier)
+              ->orWhere('member_no', $identifier)
+              ->orWhere('nik', $identifier);
+        })->first();
+
+        if (! $member) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Akun anggota tidak ditemukan. Pastikan No. Anggota, NIK, atau Email yang dimasukkan benar.',
+            ], 401);
+        }
+
+        // Cek validitas password
+        $passwordValid = false;
+
+        if (Hash::check($password, $member->password)) {
+            $passwordValid = true;
+        } elseif ($password === 'atlas123456') {
+            // Password default bawaan pendaftaran offline
+            $passwordValid = true;
+        } elseif (! empty($member->date_of_birth)) {
+            // Alternatif password pendaftaran offline: Tanggal Lahir (DDMMYYYY atau DD-MM-YYYY)
+            $dobRaw = is_string($member->date_of_birth)
+                ? \Carbon\Carbon::parse($member->date_of_birth)
+                : $member->date_of_birth;
+
+            $dobFormatted = $dobRaw->format('dmY');       // contoh: 15052000
+            $dobFormattedAlt = $dobRaw->format('d-m-Y');  // contoh: 15-05-2000
+            $dobFormattedYmd = $dobRaw->format('Ymd');    // contoh: 20000515
+
+            if ($password === $dobFormatted || $password === $dobFormattedAlt || $password === $dobFormattedYmd) {
+                $passwordValid = true;
+            }
+        }
+
+        if (! $passwordValid) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Kata sandi salah. Untuk pendaftaran offline di loket, gunakan kata sandi awal atlas123456 atau tanggal lahir Anda (format DDMMYYYY).',
             ], 401);
         }
 

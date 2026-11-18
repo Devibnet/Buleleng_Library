@@ -4,10 +4,10 @@ namespace App\Http\Controllers\Api\V1\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Admin;
-use App\Models\Loan;
-use App\Models\Member;
-use App\Models\Collection;
-use Carbon\Carbon;
+use App\Models\AdminActivityLog;
+use App\Models\AdminPasswordReset;
+use App\Services\AdminActivityLogger;
+use App\Support\StaffPassword;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -16,6 +16,16 @@ use Illuminate\Validation\Rule;
 
 class AdminAccessController extends Controller
 {
+    public function __construct(private AdminActivityLogger $activityLogger)
+    {
+    }
+
+    /** Nama: huruf, spasi, titik, koma, apostrof, strip (tanpa angka). */
+    private const NAME_REGEX = "/^[\pL\s.,'-]+$/u";
+
+    /** Email: local@domain(min 2 karakter)[.subdomain].tld(min 2 huruf). */
+    private const EMAIL_REGEX = '/^[^\s@]+@[A-Za-z0-9-]{2,}(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/';
+
     /**
      * Dapatkan instance Admin yang sedang login.
      */
@@ -60,6 +70,24 @@ class AdminAccessController extends Controller
     }
 
     /**
+     * Tambahkan waktu kedaluwarsa link reset password yang masih aktif (jika ada) ke tiap akun.
+     */
+    protected function withActiveResetLinks($admins)
+    {
+        $expiries = AdminPasswordReset::usable()
+            ->whereIn('admin_id', $admins->pluck('id'))
+            ->get(['admin_id', 'expires_at'])
+            ->groupBy('admin_id')
+            ->map(fn ($rows) => $rows->max('expires_at'));
+
+        return $admins->map(function (array $admin) use ($expiries) {
+            $expiresAt = $expiries->get($admin['id']);
+            $admin['active_reset_expires_at'] = $expiresAt?->toIso8601String();
+            return $admin;
+        })->values();
+    }
+
+    /**
      * Pastikan pemohon memiliki peran Super Admin.
      */
     protected function authorizeSuperAdmin(Request $request): ?JsonResponse
@@ -77,6 +105,28 @@ class AdminAccessController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Akses ditolak. Hanya Super Admin yang berwenang menambah, mengubah, atau menghapus akun petugas.',
+            ], 403);
+        }
+
+        return null;
+    }
+
+    /**
+     * Pastikan pemohon adalah Super Admin atau Admin (pengelola akun).
+     */
+    protected function authorizeAccountManager(?Admin $admin): ?JsonResponse
+    {
+        if (! $admin) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated. Silakan login terlebih dahulu.',
+            ], 401);
+        }
+
+        if (! in_array($admin->role, ['super_admin', 'admin'], true)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Akses ditolak. Anda tidak memiliki izin untuk mengelola akun petugas.',
             ], 403);
         }
 
@@ -148,7 +198,9 @@ class AdminAccessController extends Controller
                 'admin_count'       => $adminCount,
                 'operator_count'    => $operatorCount,
             ],
-            'data'    => collect($paginated->items())->map(fn ($admin) => $this->formatAdmin($admin))->values(),
+            'data'    => $this->withActiveResetLinks(
+                collect($paginated->items())->map(fn ($admin) => $this->formatAdmin($admin))->values()
+            ),
             'meta'    => [
                 'current_page' => $paginated->currentPage(),
                 'last_page'    => $paginated->lastPage(),
@@ -166,26 +218,40 @@ class AdminAccessController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
-        if ($deny = $this->authorizeSuperAdmin($request)) {
+        $currentAdmin = $this->getAuthenticatedAdmin($request);
+        if ($deny = $this->authorizeAccountManager($currentAdmin)) {
             return $deny;
         }
+
+        // Admin hanya boleh menambahkan akun Operator.
+        if ($currentAdmin->role === 'admin' && $request->input('role') !== 'operator') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Akses ditolak. Admin hanya dapat menambahkan akun Operator Sirkulasi.',
+            ], 403);
+        }
         $validated = $request->validate([
-            'name'      => ['required', 'string', 'max:255'],
+            'name'      => ['required', 'string', 'min:3', 'max:255', 'regex:' . self::NAME_REGEX],
             'username'  => ['required', 'string', 'max:100', 'regex:/^[a-zA-Z0-9._-]+$/', 'unique:admins,username'],
-            'email'     => ['required', 'email', 'max:255', 'unique:admins,email'],
-            'password'  => ['required', 'string', 'min:6'],
+            'email'     => ['required', 'email', 'max:255', 'regex:' . self::EMAIL_REGEX, 'unique:admins,email'],
+            'password'  => StaffPassword::rules(true),
             'role'      => ['required', Rule::in(['super_admin', 'admin', 'operator'])],
             'is_active' => ['sometimes', 'boolean'],
         ], [
             'name.required'      => 'Nama lengkap petugas wajib diisi.',
+            'name.min'           => 'Nama minimal 3 karakter.',
+            'name.regex'         => 'Nama tidak boleh mengandung angka dan hanya boleh berisi huruf, spasi, titik, koma, apostrof, atau strip.',
             'username.required'  => 'Username wajib diisi.',
             'username.unique'    => 'Username sudah digunakan oleh petugas lain.',
             'username.regex'     => 'Username hanya boleh mengandung huruf, angka, titik, strip, atau garis bawah.',
             'email.required'     => 'Alamat email wajib diisi.',
             'email.email'        => 'Format alamat email tidak valid.',
+            'email.regex'        => 'Format email tidak valid. Contoh: nama@domain.id',
             'email.unique'       => 'Alamat email sudah terdaftar.',
             'password.required'  => 'Password wajib diisi.',
             'password.min'       => 'Password minimal harus 6 karakter.',
+            'password.confirmed' => 'Verifikasi password tidak cocok.',
+            'password.regex'     => 'Password harus mengandung minimal 1 huruf besar, 1 angka, dan 1 karakter unik.',
             'role.required'      => 'Peran / hak akses wajib ditentukan.',
             'role.in'            => 'Peran yang dipilih tidak valid.',
         ]);
@@ -198,6 +264,15 @@ class AdminAccessController extends Controller
             'role'      => $validated['role'],
             'is_active' => $request->boolean('is_active', true),
         ]);
+
+        $created = AdminActivityLogger::snapshot($admin);
+        $this->activityLogger->log(
+            $request,
+            $currentAdmin,
+            'account_created',
+            $admin,
+            collect($created)->map(fn ($value) => ['from' => null, 'to' => $value])->all()
+        );
 
         return response()->json([
             'success' => true,
@@ -234,7 +309,8 @@ class AdminAccessController extends Controller
      */
     public function update(Request $request, int $id): JsonResponse
     {
-        if ($deny = $this->authorizeSuperAdmin($request)) {
+        $requester = $this->getAuthenticatedAdmin($request);
+        if ($deny = $this->authorizeAccountManager($requester)) {
             return $deny;
         }
         $admin = Admin::find($id);
@@ -246,22 +322,44 @@ class AdminAccessController extends Controller
             ], 404);
         }
 
+        // Admin hanya boleh mengedit akunnya sendiri, tanpa mengubah peran.
+        if ($requester->role === 'admin') {
+            if ($requester->id !== $admin->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Akses ditolak. Admin hanya dapat mengedit akunnya sendiri.',
+                ], 403);
+            }
+
+            if ($request->has('role') && $request->input('role') !== 'admin') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Akses ditolak. Admin tidak dapat mengubah perannya sendiri.',
+                ], 403);
+            }
+        }
+
         $validated = $request->validate([
-            'name'      => ['required', 'string', 'max:255'],
+            'name'      => ['required', 'string', 'min:3', 'max:255', 'regex:' . self::NAME_REGEX],
             'username'  => ['required', 'string', 'max:100', 'regex:/^[a-zA-Z0-9._-]+$/', Rule::unique('admins', 'username')->ignore($admin->id)],
-            'email'     => ['required', 'email', 'max:255', Rule::unique('admins', 'email')->ignore($admin->id)],
-            'password'  => ['nullable', 'string', 'min:6'],
+            'email'     => ['required', 'email', 'max:255', 'regex:' . self::EMAIL_REGEX, Rule::unique('admins', 'email')->ignore($admin->id)],
+            'password'  => StaffPassword::rules(false),
             'role'      => ['required', Rule::in(['super_admin', 'admin', 'operator'])],
             'is_active' => ['sometimes', 'boolean'],
         ], [
             'name.required'      => 'Nama lengkap petugas wajib diisi.',
+            'name.min'           => 'Nama minimal 3 karakter.',
+            'name.regex'         => 'Nama tidak boleh mengandung angka dan hanya boleh berisi huruf, spasi, titik, koma, apostrof, atau strip.',
             'username.required'  => 'Username wajib diisi.',
             'username.unique'    => 'Username sudah digunakan oleh petugas lain.',
             'username.regex'     => 'Username hanya boleh mengandung huruf, angka, titik, strip, atau garis bawah.',
             'email.required'     => 'Alamat email wajib diisi.',
             'email.email'        => 'Format alamat email tidak valid.',
+            'email.regex'        => 'Format email tidak valid. Contoh: nama@domain.id',
             'email.unique'       => 'Alamat email sudah terdaftar.',
             'password.min'       => 'Password minimal harus 6 karakter.',
+            'password.confirmed' => 'Verifikasi password tidak cocok.',
+            'password.regex'     => 'Password harus mengandung minimal 1 huruf besar, 1 angka, dan 1 karakter unik.',
             'role.required'      => 'Peran / hak akses wajib ditentukan.',
             'role.in'            => 'Peran yang dipilih tidak valid.',
         ]);
@@ -307,7 +405,16 @@ class AdminAccessController extends Controller
             $updateData['password'] = Hash::make($validated['password']);
         }
 
+        $before = AdminActivityLogger::snapshot($admin);
         $admin->update($updateData);
+
+        $changes = AdminActivityLogger::diff($before, AdminActivityLogger::snapshot($admin));
+        if (! empty($validated['password'])) {
+            $changes['password'] = ['from' => null, 'to' => null, 'changed' => true];
+        }
+        if ($action = AdminActivityLogger::resolveUpdateAction($changes)) {
+            $this->activityLogger->log($request, $requester, $action, $admin, $changes);
+        }
 
         return response()->json([
             'success' => true,
@@ -362,6 +469,14 @@ class AdminAccessController extends Controller
         $admin->is_active = ! $admin->is_active;
         $admin->save();
 
+        $this->activityLogger->log(
+            $request,
+            $currentAdmin,
+            $admin->is_active ? 'account_activated' : 'account_deactivated',
+            $admin,
+            ['is_active' => ['from' => ! $admin->is_active, 'to' => (bool) $admin->is_active]]
+        );
+
         $statusText = $admin->is_active ? 'diaktifkan' : 'dinonaktifkan';
 
         return response()->json([
@@ -409,7 +524,18 @@ class AdminAccessController extends Controller
         }
 
         $name = $admin->name;
+        $deletedSnapshot = AdminActivityLogger::snapshot($admin);
         $admin->delete();
+
+        $this->activityLogger->log(
+            $request,
+            $currentAdmin,
+            'account_deleted',
+            $admin,
+            collect($deletedSnapshot)->map(fn ($value) => ['from' => $value, 'to' => null])->all(),
+            null,
+            $deletedSnapshot
+        );
 
         return response()->json([
             'success' => true,
@@ -423,106 +549,48 @@ class AdminAccessController extends Controller
      */
     public function permissionsMatrix(): JsonResponse
     {
-        $matrix = [
-            [
-                'category'    => 'PENGELOLAAN KOLEKSI',
-                'module'      => 'Entri Katalog Buku',
-                'description' => 'Membuat, mengubah, dan mengunggah metadata bibliografis buku.',
-                'permissions' => [
-                    'super_admin' => ['view' => true, 'create' => true, 'edit' => true, 'delete' => true],
-                    'admin'       => ['view' => true, 'create' => true, 'edit' => true, 'delete' => false],
-                    'operator'    => ['view' => true, 'create' => false, 'edit' => false, 'delete' => false],
-                ],
+        $full = ['view' => true, 'create' => true, 'edit' => true, 'delete' => true];
+        $none = ['view' => false, 'create' => false, 'edit' => false, 'delete' => false];
+
+        // Operator hanya memiliki akses ke Layanan Sirkulasi.
+        // Admin memiliki akses penuh kecuali pada pengelolaan akun petugas.
+        $modules = [
+            ['PENGELOLAAN KOLEKSI', 'Entri Katalog Buku', 'Membuat, mengubah, menghapus, dan mengimpor metadata bibliografis buku.', false],
+            ['PENGELOLAAN KOLEKSI', 'Daftar Koleksi & Eksemplar', 'Manajemen nomor barcode fisik, cetak label barcode, dan kondisi fisik buku.', false],
+            ['PENGELOLAAN KOLEKSI', 'Karantina Koleksi', 'Memindahkan buku rusak/hilang ke karantina, validasi, dan publikasi ke OPAC.', false],
+            ['KEANGGOTAAN', 'Entri & Data Anggota', 'Pendaftaran anggota baru, cetak KTA, verifikasi KTP, dan ekspor data.', false],
+            ['KEANGGOTAAN', 'Keranjang Bermasalah', 'Penanganan sanksi sirkulasi, pembekuan akses pinjam, tindak lanjut dan pemulihan status.', false],
+            ['LAYANAN SIRKULASI', 'Reservasi', 'Verifikasi ketersediaan buku di rak fisik, konfirmasi siap ambil, dan pengambilan di loket.', true],
+            ['LAYANAN SIRKULASI', 'Peminjaman', 'Transaksi peminjaman buku tatap muka menggunakan scanner barcode buku & KTA.', true],
+            ['LAYANAN SIRKULASI', 'Pengembalian', 'Pencatatan pengembalian buku, inspeksi kondisi fisik, dan pencatatan riwayat pinjam.', true],
+            ['LAYANAN SIRKULASI', 'Daftar Peminjaman', 'Monitoring pinjaman aktif, sinkronisasi, dan ekspor data pinjaman.', true],
+            ['LAYANAN RUANG BACA', 'Peminjaman Loker & Buku Tamu', 'Pengelolaan kunci loker penitipan barang dan presensi kehadiran pemustaka.', false],
+            ['DASHBOARD & LAPORAN', 'Dashboard, Laporan & Statistik', 'Ringkasan statistik perpustakaan dan laporan eksekutif.', false],
+            ['SISTEM', 'Pengaturan Sistem', 'Konfigurasi umum aplikasi perpustakaan.', false],
+        ];
+
+        $matrix = array_map(fn ($m) => [
+            'category'    => $m[0],
+            'module'      => $m[1],
+            'description' => $m[2],
+            'permissions' => [
+                'super_admin' => $full,
+                'admin'       => $full,
+                'operator'    => $m[3] ? $full : $none,
             ],
-            [
-                'category'    => 'PENGELOLAAN KOLEKSI',
-                'module'      => 'Daftar Koleksi & Eksemplar',
-                'description' => 'Manajemen nomor barcode fisik, cetak label barcode, dan kondisi fisik buku.',
-                'permissions' => [
-                    'super_admin' => ['view' => true, 'create' => true, 'edit' => true, 'delete' => true],
-                    'admin'       => ['view' => true, 'create' => true, 'edit' => true, 'delete' => false],
-                    'operator'    => ['view' => true, 'create' => false, 'edit' => false, 'delete' => false],
-                ],
+        ], $modules);
+
+        $matrix[] = [
+            'category'    => 'SISTEM & HAK AKSES',
+            'module'      => 'Kelola Akun Petugas',
+            'description' => 'Super Admin mengelola semua akun. Admin hanya dapat menambah akun Operator dan mengedit akunnya sendiri.',
+            'permissions' => [
+                'super_admin' => $full,
+                'admin'       => ['view' => true, 'create' => true, 'edit' => true, 'delete' => false],
+                'operator'    => $none,
             ],
-            [
-                'category'    => 'PENGELOLAAN KOLEKSI',
-                'module'      => 'Karantina Koleksi',
-                'description' => 'Memindahkan buku rusak/hilang ke karantina, validasi, dan publikasi ke OPAC.',
-                'permissions' => [
-                    'super_admin' => ['view' => true, 'create' => true, 'edit' => true, 'delete' => true],
-                    'admin'       => ['view' => true, 'create' => true, 'edit' => true, 'delete' => false],
-                    'operator'    => ['view' => true, 'create' => true, 'edit' => false, 'delete' => false],
-                ],
-            ],
-            [
-                'category'    => 'KEANGGOTAAN',
-                'module'      => 'Entri & Data Anggota',
-                'description' => 'Pendaftaran anggota baru, cetak KTA, verifikasi identitas, dan ekspor data.',
-                'permissions' => [
-                    'super_admin' => ['view' => true, 'create' => true, 'edit' => true, 'delete' => true],
-                    'admin'       => ['view' => true, 'create' => true, 'edit' => true, 'delete' => false],
-                    'operator'    => ['view' => true, 'create' => true, 'edit' => true, 'delete' => false],
-                ],
-            ],
-            [
-                'category'    => 'KEANGGOTAAN',
-                'module'      => 'Keranjang Bermasalah',
-                'description' => 'Penanganan sanksi sirkulasi, pembekuan akses pinjam, tindak lanjut dan pemulihan status.',
-                'permissions' => [
-                    'super_admin' => ['view' => true, 'create' => true, 'edit' => true, 'delete' => true],
-                    'admin'       => ['view' => true, 'create' => true, 'edit' => true, 'delete' => false],
-                    'operator'    => ['view' => true, 'create' => true, 'edit' => false, 'delete' => false],
-                ],
-            ],
-            [
-                'category'    => 'LAYANAN SIRKULASI',
-                'module'      => 'Verifikasi & Meja Reservasi',
-                'description' => 'Verifikasi ketersediaan buku di rak fisik, konfirmasi siap ambil, dan pengambilan di loket.',
-                'permissions' => [
-                    'super_admin' => ['view' => true, 'create' => true, 'edit' => true, 'delete' => true],
-                    'admin'       => ['view' => true, 'create' => true, 'edit' => true, 'delete' => true],
-                    'operator'    => ['view' => true, 'create' => true, 'edit' => true, 'delete' => false],
-                ],
-            ],
-            [
-                'category'    => 'LAYANAN SIRKULASI',
-                'module'      => 'Peminjaman Langsung Loket',
-                'description' => 'Transaksi peminjaman buku tatap muka menggunakan scanner barcode buku & KTA.',
-                'permissions' => [
-                    'super_admin' => ['view' => true, 'create' => true, 'edit' => true, 'delete' => true],
-                    'admin'       => ['view' => true, 'create' => true, 'edit' => true, 'delete' => true],
-                    'operator'    => ['view' => true, 'create' => true, 'edit' => true, 'delete' => false],
-                ],
-            ],
-            [
-                'category'    => 'LAYANAN SIRKULASI',
-                'module'      => 'Pengembalian Koleksi',
-                'description' => 'Pencatatan pengembalian buku, inspeksi kondisi fisik, dan pencatatan riwayat pinjam.',
-                'permissions' => [
-                    'super_admin' => ['view' => true, 'create' => true, 'edit' => true, 'delete' => true],
-                    'admin'       => ['view' => true, 'create' => true, 'edit' => true, 'delete' => true],
-                    'operator'    => ['view' => true, 'create' => true, 'edit' => true, 'delete' => false],
-                ],
-            ],
-            [
-                'category'    => 'RUANG BACA & FASILITAS',
-                'module'      => 'Peminjaman Loker & Buku Tamu',
-                'description' => 'Pengelolaan kunci loker penitipan barang dan presensi kehadiran pemustaka di ruang baca.',
-                'permissions' => [
-                    'super_admin' => ['view' => true, 'create' => true, 'edit' => true, 'delete' => true],
-                    'admin'       => ['view' => true, 'create' => true, 'edit' => true, 'delete' => true],
-                    'operator'    => ['view' => true, 'create' => true, 'edit' => true, 'delete' => false],
-                ],
-            ],
-            [
-                'category'    => 'SISTEM & HAK AKSES',
-                'module'      => 'Kelola Akses & Akun Petugas',
-                'description' => 'Pengelolaan akun petugas, penetapan peran (role), dan monitoring log aktivitas staf.',
-                'permissions' => [
-                    'super_admin' => ['view' => true, 'create' => true, 'edit' => true, 'delete' => true],
-                    'admin'       => ['view' => false, 'create' => false, 'edit' => false, 'delete' => false],
-                    'operator'    => ['view' => false, 'create' => false, 'edit' => false, 'delete' => false],
-                ],
+            'notes' => [
+                'admin' => 'Tambah: hanya Operator. Edit: hanya akun sendiri. Tidak dapat menonaktifkan atau menghapus akun.',
             ],
         ];
 
@@ -534,19 +602,19 @@ class AdminAccessController extends Controller
                     'key'         => 'super_admin',
                     'name'        => 'Super Admin',
                     'badge'       => 'Merah',
-                    'description' => 'Akses penuh ke seluruh modul, konfigurasi keamanan, dan manajemen pengguna.',
+                    'description' => 'Akses penuh ke seluruh modul, termasuk menambah, mengedit, menonaktifkan, dan menghapus akun Admin maupun Operator.',
                 ],
                 [
                     'key'         => 'admin',
                     'name'        => 'Pustakawan / Admin',
                     'badge'       => 'Biru',
-                    'description' => 'Pengolahan katalog, manajemen eksemplar, keanggotaan, dan rekap sirkulasi.',
+                    'description' => 'Akses ke seluruh modul. Pada kelola akun, hanya dapat menambah Operator dan mengedit akunnya sendiri.',
                 ],
                 [
                     'key'         => 'operator',
                     'name'        => 'Operator Sirkulasi',
                     'badge'       => 'Hijau',
-                    'description' => 'Pelayanan operasional loket harian sirkulasi, loker, dan buku tamu presensi.',
+                    'description' => 'Hanya layanan sirkulasi: reservasi, peminjaman, pengembalian, dan daftar peminjaman.',
                 ],
             ],
             'matrix'  => $matrix,
@@ -556,62 +624,143 @@ class AdminAccessController extends Controller
 
     /**
      * GET /api/v1/admin/access/activity-logs
-     * Riwayat aktivitas / audit trail terbaru.
+     * Audit trail perubahan akun & hak akses petugas.
+     *
+     * Query: search, action, target_role, actor_id, date_from, date_to (Y-m-d), page, per_page
      */
     public function activityLogs(Request $request): JsonResponse
     {
         $currentAdmin = $this->getAuthenticatedAdmin($request);
-        if ($currentAdmin && $currentAdmin->role === 'operator') {
-            return response()->json([
-                'success' => false,
-                'message' => 'Akses ditolak. Operator Sirkulasi tidak memiliki izin untuk melihat log audit keamanan.',
-            ], 403);
-        }
-        // Kumpulkan 15 aktivitas terbaru dari transaksi sistem untuk audit trail
-        $logs = [];
-
-        // 1. Akun admin dibuat/diupdate
-        $admins = Admin::latest('updated_at')->take(5)->get();
-        foreach ($admins as $a) {
-            $logs[] = [
-                'id'        => 'admin_' . $a->id,
-                'timestamp' => $a->updated_at ? $a->updated_at->toIso8601String() : now()->toIso8601String(),
-                'date'      => $a->updated_at ? $a->updated_at->translatedFormat('d M Y, H:i') : '-',
-                'actor'     => $a->name,
-                'role'      => $a->role,
-                'action'    => 'Pembaruan Akun Petugas',
-                'details'   => "Akun {$a->username} ({$a->email}) berstatus " . ($a->is_active ? 'Aktif' : 'Nonaktif'),
-                'type'      => 'security',
-            ];
+        if ($deny = $this->authorizeAccountManager($currentAdmin)) {
+            return $deny;
         }
 
-        // 2. Transaksi sirkulasi terbaru
-        $recentLoans = Loan::with(['member', 'collection.catalog', 'createdByAdmin'])
-            ->latest('id')
-            ->take(8)
-            ->get();
+        $query = AdminActivityLog::query();
 
-        foreach ($recentLoans as $l) {
-            $officer = $l->createdByAdmin?->name ?: 'Petugas Sirkulasi';
-            $logs[] = [
-                'id'        => 'loan_' . $l->id,
-                'timestamp' => $l->created_at ? $l->created_at->toIso8601String() : now()->toIso8601String(),
-                'date'      => $l->created_at ? $l->created_at->translatedFormat('d M Y, H:i') : '-',
-                'actor'     => $officer,
-                'role'      => 'operator',
-                'action'    => "Transaksi Sirkulasi ({$l->status})",
-                'details'   => "Peminjaman {$l->loan_number} untuk anggota {$l->member?->name} ({$l->collection?->catalog?->title})",
-                'type'      => 'circulation',
-            ];
+        if ($search = trim((string) $request->query('search'))) {
+            $query->where(function ($q) use ($search) {
+                $q->where('actor_name', 'like', "%{$search}%")
+                  ->orWhere('actor_username', 'like', "%{$search}%")
+                  ->orWhere('target_name', 'like', "%{$search}%")
+                  ->orWhere('target_username', 'like', "%{$search}%")
+                  ->orWhere('description', 'like', "%{$search}%");
+            });
         }
 
-        // Urutkan berdasarkan waktu terbaru
-        usort($logs, fn ($a, $b) => strcmp($b['timestamp'], $a['timestamp']));
+        $action = $request->query('action');
+        if ($action && $action !== 'all' && array_key_exists($action, AdminActivityLog::ACTION_LABELS)) {
+            $query->where('action', $action);
+        }
+
+        $targetRole = $request->query('target_role');
+        if ($targetRole && in_array($targetRole, ['super_admin', 'admin', 'operator'], true)) {
+            $query->where('target_role', $targetRole);
+        }
+
+        if ($actorId = (int) $request->query('actor_id')) {
+            $query->where('actor_id', $actorId);
+        }
+
+        foreach (['date_from' => '>=', 'date_to' => '<='] as $param => $operator) {
+            $value = $request->query($param);
+            if ($value && preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+                $query->whereDate('created_at', $operator, $value);
+            }
+        }
+
+        $perPage = min(max((int) $request->query('per_page', 10), 1), 100);
+        $paginated = $query->orderByDesc('created_at')->orderByDesc('id')->paginate($perPage);
 
         return response()->json([
             'success' => true,
-            'message' => 'Riwayat aktivitas sistem berhasil diambil.',
-            'data'    => array_slice($logs, 0, 15),
+            'message' => 'Log aktivitas berhasil diambil.',
+            'data'    => collect($paginated->items())->map(fn (AdminActivityLog $log) => $this->formatLog($log))->values(),
+            'meta'    => [
+                'current_page' => $paginated->currentPage(),
+                'last_page'    => $paginated->lastPage(),
+                'per_page'     => $paginated->perPage(),
+                'total'        => $paginated->total(),
+                'from'         => $paginated->firstItem(),
+                'to'           => $paginated->lastItem(),
+            ],
+            'actions' => collect(AdminActivityLog::ACTION_LABELS)
+                ->map(fn ($label, $key) => ['key' => $key, 'label' => $label])
+                ->values(),
         ]);
+    }
+
+    /**
+     * Format satu entri log untuk frontend, termasuk rincian perubahan per field.
+     */
+    protected function formatLog(AdminActivityLog $log): array
+    {
+        $fieldLabels = [
+            'name'      => 'Nama',
+            'username'  => 'Username',
+            'email'     => 'Email',
+            'role'      => 'Peran',
+            'is_active' => 'Status Akun',
+            'password'  => 'Password',
+            'reset_link' => 'Link Reset',
+        ];
+
+        $formatValue = function (string $field, $value) {
+            if ($value === null) {
+                return null;
+            }
+            return match ($field) {
+                'role'      => AdminActivityLogger::roleLabel($value),
+                'is_active' => $value ? 'Aktif' : 'Nonaktif',
+                default     => (string) $value,
+            };
+        };
+
+        // Urutkan sesuai urutan form (kolom JSON MySQL tidak menjaga urutan key)
+        $order = array_flip(array_keys($fieldLabels));
+        $rawChanges = $log->changes ?? [];
+        uksort($rawChanges, fn ($a, $b) => ($order[$a] ?? 99) <=> ($order[$b] ?? 99));
+
+        $changes = [];
+        foreach ($rawChanges as $field => $change) {
+            $isPassword = $field === 'password';
+            $changes[] = [
+                'field'       => $field,
+                'label'       => $fieldLabels[$field] ?? ucfirst($field),
+                'from'        => $isPassword ? null : $formatValue($field, $change['from'] ?? null),
+                'to'          => $isPassword ? 'Diubah (disembunyikan)' : $formatValue($field, $change['to'] ?? null),
+                'is_password' => $isPassword,
+                // Nilai asli (mis. kode peran) untuk pewarnaan di UI
+                'from_raw'    => $isPassword ? null : ($change['from'] ?? null),
+                'to_raw'      => $isPassword ? null : ($change['to'] ?? null),
+            ];
+        }
+
+        return [
+            'id'           => $log->id,
+            'action'       => $log->action,
+            'action_label' => AdminActivityLog::ACTION_LABELS[$log->action] ?? $log->action,
+            'description'  => $log->description,
+            'actor'        => [
+                'id'         => $log->actor_id,
+                'name'       => $log->actor_name ?? 'Sistem',
+                'username'   => $log->actor_username,
+                'role'       => $log->actor_role,
+                'role_label' => AdminActivityLogger::roleLabel($log->actor_role),
+            ],
+            'target'       => [
+                'id'         => $log->target_id,
+                'name'       => $log->target_name,
+                'username'   => $log->target_username,
+                'role'       => $log->target_role,
+                'role_label' => AdminActivityLogger::roleLabel($log->target_role),
+            ],
+            'changes'             => $changes,
+            'ip_address'          => $log->ip_address,
+            'user_agent'          => $log->user_agent,
+            'created_at'          => $log->created_at?->toIso8601String(),
+            // Ditampilkan dalam WITA (Buleleng, Bali)
+            'created_at_formatted'=> $log->created_at?->copy()->timezone('Asia/Makassar')->locale('id')->translatedFormat('d M Y, H:i:s') . ' WITA',
+            'created_at_human'    => $log->created_at?->copy()->locale('id')->diffForHumans(),
+        ];
     }
 }

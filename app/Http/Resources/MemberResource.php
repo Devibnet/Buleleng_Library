@@ -25,10 +25,16 @@ class MemberResource extends JsonResource
             $status = 'Akses Dibekukan';
         }
 
+        // Nomor identitas lengkap HANYA dikirim kepada anggota itu sendiri; petugas menerima versi tersamar
+        $viewer = $request->user();
+        $isSelf = $viewer instanceof \App\Models\Member && (int) $viewer->getKey() === (int) $this->id;
+
         return [
             'id'                    => $this->id,
             'member_no'             => $this->member_no,
-            'nik'                   => $this->nik,
+            'nik'                   => $isSelf ? $this->nik : null,
+            'nik_masked'            => $this->masked_identity_number,
+            'has_identity_number'   => filled($this->nik_hash),
             'name'                  => $this->name,
             'gender'                => $this->gender ?: 'L',
             'email'                 => $this->email,
@@ -52,6 +58,11 @@ class MemberResource extends JsonResource
             'ktp_verified_at'               => $this->ktp_verified_at ? $this->ktp_verified_at->toIso8601String() : null,
             'ktp_verified_by'               => $this->ktp_verified_by,
             'verification_rejection_reason' => $this->verification_rejection_reason,
+            'identity_document_type'        => $this->identity_document_type,
+            'identity_ocr_status'           => $this->identity_ocr_status,
+            'identity_ocr_result'           => $this->identity_ocr_result,
+            'identity_verified_via'         => $this->identity_verified_via,
+            'verification_expires_at'       => $this->verification_expires_at?->toIso8601String(),
             'created_at'                    => $this->created_at ? $this->created_at->toIso8601String() : null,
         ];
     }

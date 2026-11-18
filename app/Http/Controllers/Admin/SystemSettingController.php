@@ -52,7 +52,7 @@ class SystemSettingController extends Controller
      */
     public function index(Request $request)
     {
-        $admin = Auth::guard('admin')->user();
+        $admin = Auth::guard('admin')->user() ?? $request->user();
 
         if (! $admin || $admin->role === 'operator') {
             return $this->errorResponse($request, 'Akses ditolak. Role Operator tidak memiliki izin untuk mengelola Pengaturan Umum.', 403);
@@ -122,7 +122,7 @@ class SystemSettingController extends Controller
      */
     public function update(Request $request)
     {
-        $admin = Auth::guard('admin')->user();
+        $admin = Auth::guard('admin')->user() ?? $request->user();
 
         if (! $admin || $admin->role === 'operator') {
             return $this->errorResponse($request, 'Akses ditolak. Role Operator tidak memiliki izin untuk mengelola Pengaturan Umum.', 403);

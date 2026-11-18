@@ -15,32 +15,35 @@ class AuthController extends Controller
 {
     /**
      * POST /api/auth/member/login
-     * Mendukung login dengan Email, Nomor Anggota (member_no), atau NIK
+     * Login anggota HANYA dengan Email + kata sandi (No. Anggota dan NIK tidak lagi diterima).
      */
     public function loginMember(Request $request): JsonResponse
     {
         $input = $request->all();
-        $identifier = trim($input['identifier'] ?? $input['email'] ?? $input['username'] ?? '');
+        // 'identifier' tetap diterima demi kompatibilitas klien lama, tetapi isinya wajib email.
+        $email = strtolower(trim((string) ($input['email'] ?? $input['identifier'] ?? '')));
         $password = (string) ($input['password'] ?? '');
 
-        if (empty($identifier) || empty($password)) {
+        if ($email === '' || $password === '') {
             return response()->json([
                 'success' => false,
-                'message' => 'No. Anggota / NIK / Email dan kata sandi wajib diisi.',
+                'message' => 'Email dan kata sandi wajib diisi.',
             ], 422);
         }
 
-        // Cari member berdasarkan email, nomor anggota, atau NIK
-        $member = Member::where(function ($q) use ($identifier) {
-            $q->where('email', $identifier)
-              ->orWhere('member_no', $identifier)
-              ->orWhere('nik', $identifier);
-        })->first();
+        if (! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Login hanya dapat menggunakan alamat email. Contoh: nama@domain.com',
+            ], 422);
+        }
+
+        $member = Member::whereRaw('LOWER(email) = ?', [$email])->first();
 
         if (! $member) {
             return response()->json([
                 'success' => false,
-                'message' => 'Akun anggota tidak ditemukan. Pastikan No. Anggota, NIK, atau Email yang dimasukkan benar.',
+                'message' => 'Akun anggota dengan email tersebut tidak ditemukan.',
             ], 401);
         }
 

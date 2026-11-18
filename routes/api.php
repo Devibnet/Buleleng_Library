@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\GuestbookController;
 use App\Http\Controllers\Api\LockerController;
 use App\Http\Controllers\Api\OnsiteReadingController;
 use App\Http\Controllers\Api\V1\Admin\AdminAccessController;
+use App\Http\Controllers\Api\V1\Admin\AdminPasswordResetController;
 use App\Http\Controllers\Api\V1\Admin\AdminProfileController;
 use App\Http\Controllers\Api\V1\Admin\BookImportController;
 use App\Http\Controllers\Api\V1\Admin\BookManagementController;
@@ -46,6 +47,7 @@ Route::post('/auth/admin/login', [AuthController::class, 'loginAdmin']);
 Route::post('/auth/register', [MemberRegisterController::class, 'registerApi']);
 Route::post('/auth/member/register', [MemberRegisterController::class, 'registerApi']);
 Route::post('/member/register', [MemberRegisterController::class, 'registerApi']);
+Route::post('/auth/member/check-nik', [MemberRegisterController::class, 'checkNik'])->middleware('throttle:15,1');
 
 // Public Guestbook Endpoints (Bisa diakses tanpa login di root /api/guestbooks)
 Route::prefix('guestbooks')->group(function () {
@@ -53,31 +55,31 @@ Route::prefix('guestbooks')->group(function () {
     Route::post('/non-member', [GuestbookController::class, 'storeNonMember']);
     Route::post('/group', [GuestbookController::class, 'storeGroup']);
 });
-Route::get('/admin/guestbooks/reports', [GuestbookController::class, 'reports'])->middleware(['auth:admin', 'admin.role:operator,admin,super_admin']);
+Route::get('/admin/guestbooks/reports', [GuestbookController::class, 'reports'])->middleware(['auth:sanctum', 'admin.role:admin,super_admin']);
 
 // Public Onsite Reading Endpoints (Bisa diakses tanpa login di root /api/onsite-readings)
 Route::prefix('onsite-readings')->group(function () {
     Route::post('/member', [OnsiteReadingController::class, 'storeMember']);
     Route::post('/guest', [OnsiteReadingController::class, 'storeGuest']);
 });
-Route::get('/admin/onsite-readings/reports', [OnsiteReadingController::class, 'reports'])->middleware(['auth:admin', 'admin.role:operator,admin,super_admin']);
+Route::get('/admin/onsite-readings/reports', [OnsiteReadingController::class, 'reports'])->middleware(['auth:sanctum', 'admin.role:admin,super_admin']);
 
 // Admin System Settings Endpoints (Root alias)
-Route::middleware(['auth:admin', 'admin.role:super_admin,admin'])->prefix('admin/settings')->group(function () {
+Route::middleware(['auth:sanctum', 'admin.role:super_admin,admin'])->prefix('admin/settings')->group(function () {
     Route::get('/', [SystemSettingController::class, 'index']);
     Route::put('/', [SystemSettingController::class, 'update']);
     Route::post('/', [SystemSettingController::class, 'update']);
 });
 
 // Admin Circulation Verification Endpoints (Root alias)
-Route::middleware(['auth:admin', 'admin.role:operator,admin,super_admin'])->prefix('admin/circulation/reservations')->group(function () {
+Route::middleware(['auth:sanctum', 'admin.role:operator,admin,super_admin'])->prefix('admin/circulation/reservations')->group(function () {
     Route::get('/pending', [CirculationController::class, 'pendingReservations']);
     Route::post('/{id}/confirm-ready', [CirculationController::class, 'confirmReady']);
     Route::post('/{id}/mark-unavailable', [CirculationController::class, 'markUnavailable']);
 });
 
-// Admin Dashboard Endpoints (Root alias)
-Route::middleware(['auth:sanctum', 'admin.role:operator,admin,super_admin'])->prefix('admin/dashboard')->group(function () {
+// Admin Dashboard Endpoints (Root alias) — Operator tidak memiliki akses dashboard
+Route::middleware(['auth:sanctum', 'admin.role:admin,super_admin'])->prefix('admin/dashboard')->group(function () {
     Route::get('/', [DashboardController::class, 'index']);
     Route::post('/scan', [DashboardController::class, 'scan']);
     Route::post('/sync', [DashboardController::class, 'sync']);
@@ -118,7 +120,15 @@ Route::prefix('v1')->group(function () {
     // 4. Auth Endpoints
     Route::post('/auth/member/login', [AuthController::class, 'loginMember']);
     Route::post('/auth/member/register', [MemberRegisterController::class, 'registerApi']);
+    // Cek NIK ganda secara langsung dari form pendaftaran (dibatasi 15 permintaan/menit per IP)
+    Route::post('/auth/member/check-nik', [MemberRegisterController::class, 'checkNik'])->middleware('throttle:15,1');
     Route::post('/auth/admin/login', [AuthController::class, 'loginAdmin']);
+
+    // Reset password petugas via link dari Super Admin (publik, dibatasi 10 permintaan/menit per IP)
+    Route::middleware('throttle:10,1')->group(function () {
+        Route::get('/auth/admin/reset-password/{token}', [AdminPasswordResetController::class, 'verify']);
+        Route::post('/auth/admin/reset-password', [AdminPasswordResetController::class, 'reset']);
+    });
 
     // 5. Member Protected Area - Layanan Mandiri: Reservasi Saya & Pinjaman Saya (Guard: token Sanctum)
     Route::middleware('auth:sanctum')->prefix('member')->group(function () {
@@ -136,6 +146,8 @@ Route::prefix('v1')->group(function () {
         Route::match(['put', 'post'], '/', [ProfileController::class, 'update']);
         Route::post('/photo', [ProfileController::class, 'updatePhoto']);
         Route::put('/password', [ProfileController::class, 'updatePassword']);
+        // Hapus akun sendiri beserta seluruh datanya (dibatasi 5 permintaan/menit)
+        Route::delete('/', [ProfileController::class, 'destroy'])->middleware('throttle:5,1');
         Route::get('/problem-history', [\App\Http\Controllers\Api\V1\Admin\ProblemCartController::class, 'myProblemHistory']);
     });
 
@@ -143,30 +155,10 @@ Route::prefix('v1')->group(function () {
     Route::prefix('admin')->group(function () {
 
         // =========================================================================
-        // 6A. TINGKAT UMUM: DAPAT DIAKSES SELURUH PETUGAS (operator, admin, super_admin)
-        // Layanan Sirkulasi Loket, Loker, Presensi, Profil Pribadi, dan Pencarian/Cek Data
+        // 6A. LAYANAN SIRKULASI: SELURUH PETUGAS (operator, admin, super_admin)
+        // Operator HANYA memiliki akses ke grup ini (sirkulasi + profil pribadi).
         // =========================================================================
         Route::middleware(['auth:sanctum', 'admin.role:operator,admin,super_admin'])->group(function () {
-            // Dashboard Admin Otomasi & Statistik
-            Route::get('/dashboard', [DashboardController::class, 'index']);
-            Route::post('/dashboard/scan', [DashboardController::class, 'scan']);
-            Route::post('/dashboard/sync', [DashboardController::class, 'sync']);
-
-            // Read-Only Lookups untuk Loket Sirkulasi
-            Route::get('/books', [BookManagementController::class, 'index']);
-            Route::get('/books/{id}', [BookManagementController::class, 'show']);
-            Route::get('/collections', [BookManagementController::class, 'listCollections']);
-            Route::get('/members', [MemberManagementController::class, 'index']);
-            Route::get('/members/pending-verifications', [MemberManagementController::class, 'pendingVerifications']);
-            Route::get('/members/next-number', [MemberManagementController::class, 'nextNumber']);
-            Route::get('/members/{id}', [MemberManagementController::class, 'show']);
-            Route::get('/members/{id}/problem-history', [ProblemCartController::class, 'memberHistory']);
-            Route::get('/problem-carts', [ProblemCartController::class, 'index']);
-            Route::get('/problem-carts/{id}', [ProblemCartController::class, 'show']);
-
-            // Matriks Hak Akses (Informasi Peran Sistem)
-            Route::get('/access/permissions-matrix', [AdminAccessController::class, 'permissionsMatrix']);
-
             // Modul Reservasi (Verifikasi Rak & Pengambilan di Loket)
             Route::get('/circulation/reservation-desk', [ReservationDeskController::class, 'index']);
             Route::get('/circulation/reservation-desk/lookup', [ReservationDeskController::class, 'lookup']);
@@ -189,12 +181,6 @@ Route::prefix('v1')->group(function () {
             Route::get('/circulation/active-loans/export', [LoanListController::class, 'export']);
             Route::post('/circulation/active-loans/sync', [LoanListController::class, 'sync']);
 
-            // Modul Peminjaman Loker Penitipan (Loket Ruang Baca)
-            Route::get('/lockers/desk/member', [LockerDeskController::class, 'member']);
-            Route::get('/lockers/desk/lockers', [LockerDeskController::class, 'lockers']);
-            Route::get('/lockers/desk/locker', [LockerDeskController::class, 'locker']);
-            Route::post('/lockers/desk/borrow', [LockerDeskController::class, 'borrow']);
-
             // Admin Profile Management (v1)
             Route::prefix('profile')->group(function () {
                 Route::get('/', [AdminProfileController::class, 'show']);
@@ -204,10 +190,34 @@ Route::prefix('v1')->group(function () {
         });
 
         // =========================================================================
-        // 6B. TINGKAT PUSTAKAWAN & SUPER ADMIN (admin, super_admin)
-        // Pengelolaan Master Katalog, Karantina Koleksi, Data Anggota, Keranjang Bermasalah
+        // 6B. TINGKAT ADMIN & SUPER ADMIN (admin, super_admin)
+        // Dashboard, Master Katalog, Karantina, Anggota, Keranjang Bermasalah,
+        // Ruang Baca (Loker), dan Kelola Akun Petugas.
         // =========================================================================
         Route::middleware(['auth:sanctum', 'admin.role:admin,super_admin'])->group(function () {
+            // Dashboard Admin Otomasi & Statistik
+            Route::get('/dashboard', [DashboardController::class, 'index']);
+            Route::post('/dashboard/scan', [DashboardController::class, 'scan']);
+            Route::post('/dashboard/sync', [DashboardController::class, 'sync']);
+
+            // Read-Only Data Master
+            Route::get('/books', [BookManagementController::class, 'index']);
+            Route::get('/books/{id}', [BookManagementController::class, 'show']);
+            Route::get('/collections', [BookManagementController::class, 'listCollections']);
+            Route::get('/members', [MemberManagementController::class, 'index']);
+            Route::get('/members/pending-verifications', [MemberManagementController::class, 'pendingVerifications']);
+            Route::get('/members/next-number', [MemberManagementController::class, 'nextNumber']);
+            Route::get('/members/{id}', [MemberManagementController::class, 'show']);
+            Route::get('/members/{id}/problem-history', [ProblemCartController::class, 'memberHistory']);
+            Route::get('/problem-carts', [ProblemCartController::class, 'index']);
+            Route::get('/problem-carts/{id}', [ProblemCartController::class, 'show']);
+
+            // Modul Peminjaman Loker Penitipan (Loket Ruang Baca)
+            Route::get('/lockers/desk/member', [LockerDeskController::class, 'member']);
+            Route::get('/lockers/desk/lockers', [LockerDeskController::class, 'lockers']);
+            Route::get('/lockers/desk/locker', [LockerDeskController::class, 'locker']);
+            Route::post('/lockers/desk/borrow', [LockerDeskController::class, 'borrow']);
+
             // Modul Manajemen Buku & Eksemplar (Mutasi Master)
             Route::post('/books', [BookManagementController::class, 'store']);
             Route::put('/books/{id}', [BookManagementController::class, 'updateCatalog']);
@@ -235,6 +245,7 @@ Route::prefix('v1')->group(function () {
             Route::post('/members/bulk-delete', [MemberManagementController::class, 'bulkDestroy']);
             Route::post('/members/{id}/approve-ktp', [MemberManagementController::class, 'approveKtp'])->whereNumber('id');
             Route::post('/members/{id}/reject-ktp', [MemberManagementController::class, 'rejectKtp'])->whereNumber('id');
+            Route::post('/members/{id}/check-identity', [MemberManagementController::class, 'checkIdentity'])->whereNumber('id')->middleware('throttle:30,1');
 
             // Modul Keranjang Bermasalah (Mutasi & Tindak Lanjut)
             Route::post('/problem-carts', [ProblemCartController::class, 'store']);
@@ -245,27 +256,33 @@ Route::prefix('v1')->group(function () {
             Route::post('/problem-carts/{id}/resolve', [ProblemCartController::class, 'resolve']);
             Route::delete('/problem-carts/{id}', [ProblemCartController::class, 'destroy']);
 
-            // Read-Only Petugas & Log Audit untuk Pustakawan
+            // Kelola Akun Petugas & Log Audit
+            // Batasan rinci (Admin hanya boleh membuat Operator & mengedit akunnya sendiri)
+            // ditegakkan di AdminAccessController.
+            Route::get('/access/permissions-matrix', [AdminAccessController::class, 'permissionsMatrix']);
             Route::get('/access/users', [AdminAccessController::class, 'index']);
             Route::get('/access/users/{id}', [AdminAccessController::class, 'show'])->whereNumber('id');
             Route::get('/access/activity-logs', [AdminAccessController::class, 'activityLogs']);
+            Route::post('/access/users', [AdminAccessController::class, 'store']);
+            Route::put('/access/users/{id}', [AdminAccessController::class, 'update'])->whereNumber('id');
         });
 
         // =========================================================================
         // 6C. TINGKAT SUPER ADMIN MUTLAK (super_admin)
-        // Penambahan, Pengeditan, Penonaktifan, dan Penghapusan Akun Petugas Perpustakaan
+        // Penonaktifan dan Penghapusan Akun Petugas Perpustakaan
         // =========================================================================
         Route::middleware(['auth:sanctum', 'admin.role:super_admin'])->group(function () {
             Route::prefix('access')->group(function () {
-                Route::post('/users', [AdminAccessController::class, 'store']);
-                Route::put('/users/{id}', [AdminAccessController::class, 'update'])->whereNumber('id');
                 Route::patch('/users/{id}/toggle-status', [AdminAccessController::class, 'toggleStatus'])->whereNumber('id');
+                Route::post('/users/{id}/reset-link', [AdminPasswordResetController::class, 'createLink'])->whereNumber('id');
+                Route::get('/users/{id}/reset-link', [AdminPasswordResetController::class, 'status'])->whereNumber('id');
+                Route::delete('/users/{id}/reset-link', [AdminPasswordResetController::class, 'revoke'])->whereNumber('id');
                 Route::delete('/users/{id}', [AdminAccessController::class, 'destroy'])->whereNumber('id');
             });
         });
 
         // Group 'super_admin': Kelola data akun staf admin
-        Route::middleware(['auth:admin', 'admin.role:super_admin'])->prefix('super-admin')->group(function () {
+        Route::middleware(['auth:sanctum', 'admin.role:super_admin'])->prefix('super-admin')->group(function () {
             Route::get('/staff', function () {
                 return response()->json([
                     'success' => true,
@@ -276,7 +293,7 @@ Route::prefix('v1')->group(function () {
         });
 
         // Group 'admin': Kelola master data (katalog, koleksi, member, lokasi)
-        Route::middleware(['auth:admin', 'admin.role:admin,super_admin'])->prefix('master')->group(function () {
+        Route::middleware(['auth:sanctum', 'admin.role:admin,super_admin'])->prefix('master')->group(function () {
             Route::get('/catalogs', function () {
                 $catalogs = \App\Models\Catalog::all();
                 return response()->json([
@@ -306,7 +323,7 @@ Route::prefix('v1')->group(function () {
         });
 
         // Group 'operator': Transaksi sirkulasi (peminjaman, pengembalian, perpanjangan, denda)
-        Route::middleware(['auth:admin', 'admin.role:operator,admin,super_admin'])->prefix('circulation')->group(function () {
+        Route::middleware(['auth:sanctum', 'admin.role:operator,admin,super_admin'])->prefix('circulation')->group(function () {
             Route::get('/loans', [CirculationController::class, 'index']);
             Route::get('/reservations/search', [CirculationController::class, 'searchReservation']);
             Route::get('/reservations/pending', [CirculationController::class, 'pendingReservations']);
@@ -320,24 +337,24 @@ Route::prefix('v1')->group(function () {
         });
 
         // Group 'lockers': Modul Peminjaman & Pengembalian Kunci Loker
-        Route::middleware(['auth:admin', 'admin.role:operator,admin,super_admin'])->prefix('lockers')->group(function () {
+        Route::middleware(['auth:sanctum', 'admin.role:admin,super_admin'])->prefix('lockers')->group(function () {
             Route::post('/borrow', [LockerController::class, 'borrow']);
             Route::post('/return', [LockerController::class, 'returnLocker']);
             Route::get('/loans', [LockerController::class, 'loansHistory']);
         });
 
         // Group 'guestbooks': Rekap & Laporan Buku Tamu
-        Route::middleware(['auth:sanctum', 'admin.role:operator,admin,super_admin'])->prefix('guestbooks')->group(function () {
+        Route::middleware(['auth:sanctum', 'admin.role:admin,super_admin'])->prefix('guestbooks')->group(function () {
             Route::get('/reports', [GuestbookController::class, 'reports']);
         });
 
         // Group 'onsite-readings': Rekap & Laporan Baca di Tempat
-        Route::middleware(['auth:admin', 'admin.role:operator,admin,super_admin'])->prefix('onsite-readings')->group(function () {
+        Route::middleware(['auth:sanctum', 'admin.role:admin,super_admin'])->prefix('onsite-readings')->group(function () {
             Route::get('/reports', [OnsiteReadingController::class, 'reports']);
         });
 
         // Group 'reports': Modul Laporan Eksekutif (Report Engine)
-        Route::middleware(['auth:sanctum', 'admin.role:operator,admin,super_admin'])->prefix('reports')->group(function () {
+        Route::middleware(['auth:sanctum', 'admin.role:admin,super_admin'])->prefix('reports')->group(function () {
             Route::get('/circulation', [ReportController::class, 'circulation']);
             Route::get('/members', [ReportController::class, 'members']);
             Route::get('/catalogs', [ReportController::class, 'catalogs']);
@@ -346,7 +363,7 @@ Route::prefix('v1')->group(function () {
         });
 
         // Group 'settings': Modul Pengaturan Umum Sistem (System Settings)
-        Route::middleware(['auth:admin', 'admin.role:super_admin,admin'])->prefix('settings')->group(function () {
+        Route::middleware(['auth:sanctum', 'admin.role:super_admin,admin'])->prefix('settings')->group(function () {
             Route::get('/', [SystemSettingController::class, 'index']);
             Route::put('/', [SystemSettingController::class, 'update']);
             Route::post('/', [SystemSettingController::class, 'update']);

@@ -3,10 +3,18 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Models\Guestbook;
+use App\Models\Loan;
+use App\Models\LoanExtension;
+use App\Models\LockerLoan;
 use App\Models\Member;
+use App\Models\MemberCart;
+use App\Models\OnsiteReading;
+use App\Models\ReservedCollection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
@@ -50,11 +58,16 @@ class ProfileController extends Controller
         return [
             'id'                       => $member->id,
             'member_no'                => $member->member_no,
+            // Hanya untuk anggota itu sendiri (endpoint profil miliknya); petugas tidak pernah menerimanya
+            'identity_number'          => $member->nik,
+            'identity_document_type'   => $member->identity_document_type,
             'name'                     => $member->name,
             'status'                   => $status,
             'is_problematic'           => $isProblematic,
             'active_problems_count'    => $activeProblemsCount,
             'circulation_block_reason' => $member->circulationBlockReason(),
+            'verification_expires_at'  => $member->verification_expires_at?->toIso8601String(),
+            'verification_rejection_reason' => $member->verification_rejection_reason,
             'valid_until'              => $member->valid_until ? (is_string($member->valid_until) ? $member->valid_until : $member->valid_until->format('Y-m-d')) : null,
             'residential_address'      => $member->residential_address,
             'ktp_address'              => $member->ktp_address,
@@ -423,5 +436,139 @@ class ProfileController extends Controller
             'success' => true,
             'message' => 'Password akun berhasil diperbarui.',
         ], 200);
+    }
+
+    /**
+     * Hapus akun milik anggota sendiri beserta seluruh datanya (UU PDP: hak penghapusan data pribadi).
+     *
+     * Ditolak bila masih ada urusan yang belum selesai dengan perpustakaan: buku yang sedang dipinjam,
+     * kasus Keranjang Bermasalah (denda, buku rusak/hilang), atau loker yang belum dikembalikan.
+     * Reservasi yang masih menunggu dibatalkan dan eksemplarnya dikembalikan ke rak.
+     *
+     * Yang dihapus: data anggota, pas foto, token login, riwayat pinjam + perpanjangan, reservasi,
+     * favorit, riwayat keranjang bermasalah (yang sudah selesai), riwayat loker, serta buku tamu dan
+     * catatan baca di tempat milik anggota ini.
+     */
+    public function destroy(Request $request): JsonResponse
+    {
+        $member = $this->getAuthenticatedMember($request);
+
+        if (! $member) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated.',
+            ], 401);
+        }
+
+        $request->validate([
+            'confirm'  => ['accepted'],
+            'password' => ['nullable', 'string'],
+            'email'    => ['nullable', 'string'],
+        ], [
+            'confirm.accepted' => 'Centang pernyataan persetujuan sebelum menghapus akun.',
+        ]);
+
+        // Bukti pemilik akun: kata sandi. Akun Google tidak punya kata sandi yang diketahui pemiliknya
+        // (dibuat acak saat mendaftar), jadi untuk akun Google cukup mengetik ulang alamat emailnya.
+        $password = (string) $request->input('password', '');
+        if ($password !== '') {
+            if (! Hash::check($password, $member->password)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Kata sandi salah.',
+                    'errors'  => ['password' => ['Kata sandi salah.']],
+                ], 422);
+            }
+        } elseif (! empty($member->google_id)) {
+            $typedEmail = mb_strtolower(trim((string) $request->input('email', '')));
+            if ($typedEmail === '' || $typedEmail !== mb_strtolower($member->email)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Alamat email yang diketik tidak sama dengan email akun Anda.',
+                    'errors'  => ['email' => ['Alamat email yang diketik tidak sama dengan email akun Anda.']],
+                ], 422);
+            }
+        } else {
+            return response()->json([
+                'success' => false,
+                'message' => 'Masukkan kata sandi akun Anda untuk menghapus akun.',
+                'errors'  => ['password' => ['Masukkan kata sandi akun Anda untuk menghapus akun.']],
+            ], 422);
+        }
+
+        $activeLoans = $member->loans()
+            ->whereIn('status', [Loan::STATUS_BORROWED, Loan::STATUS_OVERDUE])
+            ->count();
+        if ($activeLoans > 0) {
+            return $this->deleteBlocked("Akun belum bisa dihapus karena masih ada {$activeLoans} buku yang Anda pinjam. Kembalikan bukunya di DAPD Buleleng terlebih dahulu.");
+        }
+
+        $openCases = $member->memberCarts()->where('is_resolved', false)->count();
+        if ($openCases > 0) {
+            return $this->deleteBlocked("Akun belum bisa dihapus karena masih ada {$openCases} kasus di Keranjang Bermasalah (misalnya denda atau buku rusak/hilang). Selesaikan dulu di loket DAPD Buleleng.");
+        }
+
+        $activeLockers = $member->lockerLoans()->whereIn('status', ['ACTIVE', 'OVERDUE', 'VIOLATION'])->count();
+        if ($activeLockers > 0) {
+            return $this->deleteBlocked('Akun belum bisa dihapus karena kunci loker belum dikembalikan. Kembalikan kunci loker ke petugas terlebih dahulu.');
+        }
+
+        $catalogs = [];
+
+        DB::transaction(function () use ($member, &$catalogs) {
+            // Reservasi yang masih menunggu: kembalikan eksemplar ke rak bila masih dipegang reservasi ini
+            $reservations = $member->loans()
+                ->whereIn('status', [Loan::STATUS_PENDING_CHECK, Loan::STATUS_READY_FOR_PICKUP, Loan::STATUS_RESERVED])
+                ->with('collection.catalog')
+                ->lockForUpdate()
+                ->get();
+            foreach ($reservations as $reservation) {
+                $collection = $reservation->collection;
+                if (! $collection) {
+                    continue;
+                }
+                if (in_array($collection->availability_status, ['PENDING_CHECK', 'READY_FOR_PICKUP', 'RESERVED'], true)) {
+                    $collection->update(['availability_status' => 'AVAILABLE']);
+                }
+                if ($collection->catalog) {
+                    $catalogs[$collection->catalog->id] = $collection->catalog;
+                }
+            }
+
+            // Buku tamu & baca di tempat: foreign key-nya hanya mengosongkan member_id, padahal barisnya
+            // memuat nama, nomor HP, dan alamat. Jadi dihapus secara eksplisit.
+            $guestbookIds = Guestbook::where('member_id', $member->id)->pluck('id');
+            OnsiteReading::where('member_id', $member->id)->orWhereIn('guestbook_id', $guestbookIds)->delete();
+            Guestbook::whereIn('id', $guestbookIds)->delete();
+
+            // Tabel lain sudah cascade di database; tetap dihapus eksplisit supaya urutannya jelas
+            $loanIds = $member->loans()->pluck('id');
+            MemberCart::where('member_id', $member->id)->delete();
+            LoanExtension::whereIn('loan_id', $loanIds)->delete();
+            Loan::whereIn('id', $loanIds)->delete();
+            LockerLoan::where('member_id', $member->id)->delete();
+            ReservedCollection::where('member_id', $member->id)->delete();
+            DB::table('member_favorites')->where('member_id', $member->id)->delete();
+
+            // Pas foto, berkas KTP lama, token login, lalu baris anggota
+            $member->deleteRegistration();
+        });
+
+        foreach ($catalogs as $catalog) {
+            $catalog->recalculateCopies();
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Akun dan seluruh data Anda sudah dihapus.',
+        ], 200);
+    }
+
+    protected function deleteBlocked(string $message): JsonResponse
+    {
+        return response()->json([
+            'success' => false,
+            'message' => $message,
+        ], 422);
     }
 }

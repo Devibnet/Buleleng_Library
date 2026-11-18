@@ -9,6 +9,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -31,7 +32,8 @@ class MemberManagementController extends Controller
                 $q->where('name', 'like', "%{$search}%")
                   ->orWhere('member_no', 'like', "%{$search}%")
                   ->orWhere('phone_number', 'like', "%{$search}%")
-                  ->orWhere('nik', 'like', "%{$search}%")
+                  // Nomor identitas terenkripsi: hanya bisa dicari bila diketik lengkap
+                  ->orWhere(fn ($nq) => $nq->whereIdentityNumber($search))
                   ->orWhere('institution_name', 'like', "%{$search}%")
                   ->orWhere('email', 'like', "%{$search}%")
                   ->orWhere('place_of_birth', 'like', "%{$search}%");
@@ -161,7 +163,11 @@ class MemberManagementController extends Controller
             'ktp_address'         => ['required', 'string'],
             'residential_address' => ['required', 'string'],
             'gender'              => ['required', 'string', 'in:L,P'],
-            'nik'                 => ['required', 'digits:16', 'unique:members,nik'],
+            'nik'                 => ['required', 'digits:16', function ($attribute, $value, $fail) {
+                if (Member::withIdentityNumber('nik', (string) $value)->exists()) {
+                    $fail('NIK ini sudah terdaftar sebagai anggota perpustakaan.');
+                }
+            }],
             'email'               => ['nullable', 'email', 'max:255', 'unique:members,email'],
             'photo'               => ['nullable'],
             'status'              => ['nullable', 'string', 'max:50'],
@@ -302,7 +308,25 @@ class MemberManagementController extends Controller
             ], 404);
         }
 
-        $validator = Validator::make($request->all(), [
+        // Anggota yang mendaftar dengan KTM / Kartu Pelajar menyimpan NIM / NISN pada kolom `nik`
+        $numberKind = Member::identityNumberKind($member->identity_document_type);
+        $input = $request->all();
+        // Petugas tidak pernah melihat nomor tersimpan: kolom kosong berarti nomor tidak diubah
+        if (isset($input['nik']) && is_scalar($input['nik'])) {
+            $input['nik'] = Member::normalizeIdentityNumber($numberKind, $input['nik']);
+        }
+        if (($input['nik'] ?? '') === '') {
+            $input['nik'] = null;
+        }
+        $numberFormat = $numberKind === 'nik'
+            ? 'digits:16'
+            : function ($attribute, $value, $fail) use ($numberKind) {
+                if ($error = Member::identityNumberError($numberKind, (string) $value)) {
+                    $fail($error);
+                }
+            };
+
+        $validator = Validator::make($input, [
             'name'                => ['required', 'string', 'max:255'],
             'gender'              => ['required', 'string', 'in:L,P'],
             'place_of_birth'      => ['required', 'string', 'max:255'],
@@ -312,13 +336,17 @@ class MemberManagementController extends Controller
             'phone_number'        => ['required', 'string', 'max:30'],
             'ktp_address'         => ['required', 'string'],
             'residential_address' => ['required', 'string'],
-            'nik'                 => ['required', 'digits:16', 'unique:members,nik,' . $id],
+            'nik'                 => ['nullable', $numberFormat, function ($attribute, $value, $fail) use ($numberKind, $id) {
+                if (Member::withIdentityNumber($numberKind, (string) $value)->where('id', '!=', $id)->exists()) {
+                    $fail(Member::IDENTITY_NUMBER_RULES[$numberKind]['label'] . ' ini sudah terdaftar sebagai anggota perpustakaan.');
+                }
+            }],
             'email'               => ['nullable', 'email', 'max:255', 'unique:members,email,' . $id],
             'status'              => ['nullable', 'string', 'max:50'],
         ], [
-            'nik.required'                 => 'Nomor Induk Kependudukan (NIK) wajib diisi.',
+            'nik.required'                 => Member::IDENTITY_NUMBER_RULES[$numberKind]['label'] . ' wajib diisi.',
             'nik.digits'                   => 'NIK harus berjumlah tepat 16 digit angka.',
-            'nik.unique'                   => 'NIK ini sudah terdaftar sebagai anggota perpustakaan.',
+            'nik.unique'                   => Member::IDENTITY_NUMBER_RULES[$numberKind]['label'] . ' ini sudah terdaftar sebagai anggota perpustakaan.',
             'name.required'                => 'Nama lengkap wajib diisi sesuai identitas resmi.',
             'gender.required'              => 'Jenis kelamin wajib dipilih (Laki-Laki atau Perempuan).',
             'gender.in'                    => 'Pilihan jenis kelamin harus L (Laki-Laki) atau P (Perempuan).',
@@ -506,7 +534,7 @@ class MemberManagementController extends Controller
 
             fputcsv($handle, [
                 'No. Anggota',
-                'NIK / NISN',
+                'NIK / NIM / NISN (tersamar)',
                 'Nama Lengkap',
                 'Jenis Kelamin',
                 'Tempat Lahir',
@@ -526,7 +554,7 @@ class MemberManagementController extends Controller
                 $validUntil = $m->valid_until ? $m->valid_until->format('d-m-Y') : date('d-m-Y', strtotime('+5 years', strtotime($m->created_at)));
                 fputcsv($handle, [
                     $m->member_no,
-                    $m->nik ?: '-',
+                    $m->masked_identity_number ?: '-',
                     $m->name,
                     $m->gender === 'P' ? 'Perempuan' : 'Laki-laki',
                     $m->place_of_birth ?: '-',
@@ -560,7 +588,8 @@ class MemberManagementController extends Controller
             $search = trim($request->search);
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
-                  ->orWhere('nik', 'like', "%{$search}%")
+                  // Nomor identitas terenkripsi: hanya bisa dicari bila diketik lengkap
+                  ->orWhere(fn ($nq) => $nq->whereIdentityNumber($search))
                   ->orWhere('email', 'like', "%{$search}%")
                   ->orWhere('member_no', 'like', "%{$search}%")
                   ->orWhere('phone_number', 'like', "%{$search}%");
@@ -582,40 +611,138 @@ class MemberManagementController extends Controller
     }
 
     /**
-     * Verifikasi & Setujui Pendaftaran Anggota KTP Bali
-     * Berkas foto KTP otomatis dimusnahkan secara permanen dari server storage
+     * Verifikasi tatap muka: petugas sudah memeriksa KTP asli pendaftar, lalu menyetujui.
+     *
+     * Petugas boleh mengoreksi NIK (mis. pendaftar salah ketik) lewat field `nik`. NIK yang sudah
+     * dipakai anggota lain ditolak. Untuk pendaftaran lama yang masih menyimpan foto, foto ikut dihapus.
      */
     public function approveKtp(Request $request, int|string $id): JsonResponse
     {
         $member = Member::findOrFail($id);
 
-        // Hapus fisik foto KTP dari storage demi perlindungan privasi UU PDP
+        if ($member->status !== Member::STATUS_PENDING) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Pendaftaran ini tidak sedang menunggu verifikasi.',
+            ], 422);
+        }
+
+        // Nomor identitas mengikuti kartu pendaftar: NIK (KTP/KIA), NIM (KTM), atau NISN (Kartu Pelajar)
+        $kind = Member::identityNumberKind($member->identity_document_type);
+        $label = Member::IDENTITY_NUMBER_RULES[$kind]['label'];
+
+        // Petugas tidak melihat nomor yang didaftarkan. Ia mengetik nomor dari kartu asli; bila berbeda dengan
+        // data pendaftaran, nomor ketikan petugas yang dipakai (koreksi).
+        if (! $request->filled('nik')) {
+            return response()->json([
+                'success' => false,
+                'message' => "Ketik {$label} sesuai kartu asli pemohon untuk memverifikasi.",
+            ], 422);
+        }
+
+        $correctedNik = null;
+        if ($request->filled('nik')) {
+            $nik = Member::normalizeIdentityNumber($kind, $request->input('nik'));
+            if ($error = Member::identityNumberError($kind, $nik)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $error,
+                ], 422);
+            }
+
+            if (! $member->identityNumberMatches($nik)) {
+                // Akun lain yang juga masih menunggu verifikasi tidak dihitung (nomornya belum terbukti)
+                $owner = Member::notPendingCounter()->withIdentityNumber($kind, $nik)->where('id', '!=', $member->id)->first();
+                if ($owner) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => "{$label} " . Member::maskIdentityNumber($nik) . " sudah dipakai anggota lain: {$owner->name} ({$owner->member_no}). Periksa kembali kartu asli pendaftar.",
+                    ], 422);
+                }
+                $correctedNik = $nik;
+            }
+        } elseif ($member->nik) {
+            // Tanpa koreksi: nomor yang sudah ada juga harus tidak bentrok dengan anggota aktif lain
+            $owner = Member::notPendingCounter()->withIdentityNumber($kind, $member->nik)->where('id', '!=', $member->id)->first();
+            if ($owner) {
+                return response()->json([
+                    'success' => false,
+                    'message' => "{$label} pendaftar sudah dipakai anggota lain: {$owner->name} ({$owner->member_no}). Koreksi {$label} sesuai kartu asli, atau tolak pendaftaran ini.",
+                ], 422);
+            }
+        }
+
+        // Pendaftaran lama: hapus fisik foto KTP dari storage demi perlindungan privasi UU PDP
         if (!empty($member->ktp_photo_path)) {
             $this->purgeKtpPhoto($member->ktp_photo_path);
         }
 
         $adminId = auth()->id();
+        $before = $member->nik;
 
         $member->update([
+            'nik'                           => $correctedNik ?? $member->nik,
             'status'                        => 'Aktif Bebas Pustaka',
             'ktp_photo_path'                => null,
+            'identity_ocr_result'           => null,
             'ktp_verified_at'               => now(),
             'ktp_verified_by'               => $adminId,
+            'identity_verified_via'         => Member::VERIFIED_COUNTER,
+            'verification_expires_at'       => null,
             'verification_rejection_reason' => null,
             'valid_until'                   => $member->valid_until ?: now()->addYears(5),
             'max_loans'                     => 3,
         ]);
 
+        if ($correctedNik) {
+            Log::info("Petugas mengoreksi {$label} anggota saat verifikasi tatap muka", [
+                'admin_id'  => $adminId,
+                'member_id' => $member->id,
+                'nik_lama'  => $this->maskNik($before),
+                'nik_baru'  => $this->maskNik($correctedNik),
+            ]);
+        }
+
         return response()->json([
             'success' => true,
-            'message' => 'Pendaftaran anggota berhasil disetujui! Foto KTP pemohon telah otomatis dihapus permanen dari server sesuai UU PDP.',
+            'message' => $correctedNik
+                ? "Keanggotaan diverifikasi tatap muka. {$label} telah dikoreksi sesuai kartu asli."
+                : 'Keanggotaan berhasil diverifikasi tatap muka dan akun kini aktif.',
             'data'    => new MemberResource($member->fresh()),
         ]);
     }
 
+    private function maskNik(?string $nik): ?string
+    {
+        return Member::maskIdentityNumber($nik);
+    }
+
     /**
-     * Tolak Pendaftaran Anggota KTP Bali
-     * Berkas foto KTP juga otomatis dihapus permanen dari storage dan alasan penolakan dicatat
+     * Cocokkan nomor yang diketik petugas dari kartu asli dengan data pendaftaran, TANPA menampilkan nomor
+     * tersimpan (POST /admin/members/{id}/check-identity). Hanya menjawab sama / berbeda.
+     */
+    public function checkIdentity(Request $request, int|string $id): JsonResponse
+    {
+        $member = Member::findOrFail($id);
+        $kind = Member::identityNumberKind($member->identity_document_type);
+        $number = Member::normalizeIdentityNumber($kind, $request->input('nik'));
+
+        if ($error = Member::identityNumberError($kind, $number)) {
+            return response()->json(['success' => false, 'message' => $error], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'matches' => $member->identityNumberMatches($number),
+        ]);
+    }
+
+    /**
+     * Tolak pendaftaran yang menunggu verifikasi tatap muka (kartu identitas tidak sesuai / tidak sah).
+     *
+     * Akun pendaftar LANGSUNG DIHAPUS beserta pas foto dan token login-nya, agar tidak menumpuk akun
+     * yang tidak terpakai. Pemohon dapat mendaftar ulang dengan data yang benar. Alasan penolakan
+     * dicatat di log aplikasi (bukan di data anggota, karena datanya sudah dihapus).
      */
     public function rejectKtp(Request $request, int|string $id): JsonResponse
     {
@@ -628,25 +755,56 @@ class MemberManagementController extends Controller
 
         $member = Member::findOrFail($id);
 
-        // Hapus fisik foto KTP dari storage jika ada
-        if (!empty($member->ktp_photo_path)) {
-            $this->purgeKtpPhoto($member->ktp_photo_path);
+        if ($member->status !== Member::STATUS_PENDING) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Pendaftaran ini tidak sedang menunggu verifikasi.',
+            ], 422);
         }
 
         $adminId = auth()->id();
+        $name = $member->name;
+        $memberNo = $member->member_no;
 
-        $member->update([
-            'status'                        => 'Ditolak',
-            'ktp_photo_path'                => null,
-            'verification_rejection_reason' => $request->reason,
-            'ktp_verified_at'               => now(),
-            'ktp_verified_by'               => $adminId,
+        // Pengaman: akun yang sudah punya riwayat peminjaman tidak dihapus (riwayat sirkulasi ikut terhapus
+        // bila akunnya dihapus). Akun seperti ini hanya ditandai Ditolak.
+        if ($member->loans()->exists()) {
+            if (! empty($member->ktp_photo_path)) {
+                $this->purgeKtpPhoto($member->ktp_photo_path);
+            }
+            $member->update([
+                'status'                        => 'Ditolak',
+                'ktp_photo_path'                => null,
+                'identity_ocr_result'           => null,
+                'identity_verified_via'         => null,
+                'verification_expires_at'       => null,
+                'verification_rejection_reason' => $request->reason,
+                'ktp_verified_at'               => now(),
+                'ktp_verified_by'               => $adminId,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'deleted' => false,
+                'message' => "Pendaftaran {$name} ditolak. Akun tidak dihapus karena memiliki riwayat peminjaman.",
+                'data'    => new MemberResource($member->fresh()),
+            ]);
+        }
+
+        DB::transaction(fn () => $member->deleteRegistration());
+
+        Log::info('Pendaftaran anggota ditolak petugas dan akun dihapus', [
+            'admin_id'      => $adminId,
+            'member_id'     => $member->id,
+            'member_no'     => $memberNo,
+            'document_type' => $member->identity_document_type,
+            'reason'        => $request->reason,
         ]);
 
         return response()->json([
             'success' => true,
-            'message' => 'Pendaftaran anggota berhasil ditolak. Berkas foto KTP pemohon telah otomatis dimusnahkan dari server.',
-            'data'    => new MemberResource($member->fresh()),
+            'deleted' => true,
+            'message' => "Pendaftaran {$name} ({$memberNo}) ditolak dan akunnya telah dihapus.",
         ]);
     }
 

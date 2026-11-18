@@ -207,7 +207,7 @@ class BorrowingController extends Controller
     private function findMember(string $code): ?Member
     {
         return Member::where('member_no', $code)
-            ->orWhere('nik', $code)
+            ->orWhere(fn ($q) => $q->whereIdentityNumber($code))
             ->orWhere('email', $code)
             ->first();
     }

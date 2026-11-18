@@ -35,7 +35,7 @@ class LockerDeskController extends Controller
         $code = trim($request->query('code'));
 
         $member = Member::where('member_no', $code)
-            ->orWhere('nik', $code)
+            ->orWhere(fn ($q) => $q->whereIdentityNumber($code))
             ->orWhere('email', $code)
             ->first();
 

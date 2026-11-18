@@ -65,7 +65,7 @@ class ReturnController extends Controller
         }
 
         $member = Member::where('member_no', $code)
-            ->orWhere('nik', $code)
+            ->orWhere(fn ($q) => $q->whereIdentityNumber($code))
             ->orWhere('email', $code)
             ->first();
 

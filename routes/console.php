@@ -10,3 +10,6 @@ Artisan::command('inspire', function () {
 
 // Batalkan reservasi yang melewati batas pengambilan (H+3 hari kerja) & kembalikan stok
 Schedule::command('loans:cancel-expired')->hourly();
+
+// Hapus pendaftaran yang memilih verifikasi tatap muka tetapi tidak datang ke DAPD sampai batas waktunya
+Schedule::command('members:purge-expired-pending')->dailyAt('01:30');

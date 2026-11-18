@@ -36,7 +36,7 @@ class ProblemCartController extends Controller
                       $mq->where('name', 'like', "%{$search}%")
                         ->orWhere('member_no', 'like', "%{$search}%")
                         ->orWhere('phone_number', 'like', "%{$search}%")
-                        ->orWhere('nik', 'like', "%{$search}%")
+                        ->orWhere(fn ($nq) => $nq->whereIdentityNumber($search))
                         ->orWhere('institution_name', 'like', "%{$search}%");
                   });
             });

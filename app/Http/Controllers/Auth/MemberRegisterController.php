@@ -13,6 +13,123 @@ use Illuminate\View\View;
 
 class MemberRegisterController extends Controller
 {
+    /** Versi teks Pernyataan Persetujuan Pemrosesan Data Pribadi (harus sama dengan frontend). */
+    public const DATA_CONSENT_VERSION = '2026-11-12-1';
+
+    /** Kartu yang dapat dipakai mendaftar: KTP dan KIA (NIK), KTM (NIM), Kartu Pelajar (NISN). */
+    public const IDENTITY_DOCUMENT_TYPES = ['ktp', 'kia', 'ktm', 'kartu_pelajar'];
+
+    public const IDENTITY_OCR_STATUSES = ['matched', 'mismatch', 'unreadable', 'not_applicable', 'unchecked'];
+
+    private function numberTakenMessage(string $kind): string
+    {
+        $label = Member::IDENTITY_NUMBER_RULES[$kind]['label'];
+
+        return "{$label} ini sudah terdaftar sebagai anggota perpustakaan. Jika itu milik Anda, silakan masuk menggunakan email yang terdaftar atau hubungi petugas.";
+    }
+
+    /**
+     * Anggota lain yang sudah memakai nomor identitas ini (NIK / NIM / NISN). Akun yang masih menunggu
+     * verifikasi tatap muka tidak dihitung, karena nomornya belum terbukti milik pendaftar (mencegah
+     * "memesan" nomor orang lain).
+     */
+    private function identityNumberOwner(string $kind, string $number, ?int $ignoreId = null): ?Member
+    {
+        return Member::notPendingCounter()
+            ->withIdentityNumber($kind, $number)
+            ->when($ignoreId, fn ($q) => $q->where('id', '!=', $ignoreId))
+            ->first(['id', 'email']);
+    }
+
+    /**
+     * Cek nomor identitas ganda langsung dari formulir (POST /api/v1/auth/member/check-nik).
+     * `document_type` menentukan jenis nomornya (default KTP → NIK).
+     * Dibatasi throttle di route agar tidak dipakai menebak-nebak nomor orang lain.
+     */
+    public function checkNik(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $kind = Member::identityNumberKind($request->input('document_type'));
+        $number = Member::normalizeIdentityNumber($kind, $request->input('nik'));
+        if ($error = Member::identityNumberError($kind, $number)) {
+            return response()->json([
+                'success' => false,
+                'message' => $error,
+            ], 422);
+        }
+
+        $email = strtolower(trim((string) $request->input('email')));
+        $owner = $this->identityNumberOwner($kind, $number);
+        // Pendaftar Google yang melengkapi datanya sendiri tidak dianggap duplikat
+        $available = ! $owner || ($email !== '' && strtolower((string) $owner->email) === $email);
+
+        return response()->json([
+            'success'   => true,
+            'available' => $available,
+            'message'   => $available
+                ? Member::IDENTITY_NUMBER_RULES[$kind]['label'] . ' dapat digunakan.'
+                : $this->numberTakenMessage($kind),
+        ]);
+    }
+
+    /**
+     * Catatan hasil pemeriksaan foto di browser pendaftar. Hanya status dan jumlah percobaan yang
+     * disimpan; nomor hasil baca mesin TIDAK disimpan (bisa saja milik orang lain pada foto yang salah).
+     */
+    private function sanitizeIdentityOcr(array $validated): array
+    {
+        $type = $validated['identity_document_type'] ?? null;
+        $status = $validated['identity_ocr_status'] ?? 'unchecked';
+        $raw = json_decode((string) ($validated['identity_ocr_result'] ?? ''), true);
+        $raw = is_array($raw) ? $raw : [];
+
+        return [
+            'identity_document_type' => $type,
+            'identity_ocr_status'    => $status,
+            'identity_ocr_result'    => [
+                'attempts'   => isset($raw['attempts']) ? max(0, min(50, (int) $raw['attempts'])) : null,
+                'fuzzy'      => (bool) ($raw['fuzzy'] ?? false),
+                'checked_at' => now()->toIso8601String(),
+            ],
+        ];
+    }
+
+    /**
+     * Tentukan status akun dari cara verifikasi yang dipilih pendaftar.
+     *
+     *  - online  : NIK/NIM/NISN cocok dengan foto kartu (diperiksa di browser; foto tidak dikirim) → akun langsung aktif.
+     *  - counter : pendaftar memilih verifikasi di DAPD → menunggu; dihapus bila ditolak petugas atau tidak datang.
+     *
+     * Mengembalikan [atribut akun, pesan galat|null].
+     */
+    private function verificationAttributes(string $mode, array $identity, bool $onlineAllowed): array
+    {
+        if ($mode === 'online') {
+            if (! $onlineAllowed) {
+                return [[], 'Akun ini harus diverifikasi langsung oleh petugas di DAPD Buleleng. Pilih "Tetap daftar" untuk verifikasi tatap muka.'];
+            }
+            if (! in_array($identity['identity_document_type'], self::IDENTITY_DOCUMENT_TYPES, true)
+                || $identity['identity_ocr_status'] !== 'matched') {
+                return [[], Member::identityNumberLabel($identity['identity_document_type'])
+                    . ' belum terverifikasi secara online. Pilih "Tetap daftar" untuk verifikasi langsung di DAPD Buleleng.'];
+            }
+
+            return [[
+                'status'                   => 'Aktif Bebas Pustaka',
+                'valid_until'              => now()->addYears(5),
+                'identity_verified_via'    => Member::VERIFIED_ONLINE,
+                'verification_expires_at'  => null,
+                'verification_rejection_reason' => null,
+            ], null];
+        }
+
+        return [[
+            'status'                   => Member::STATUS_PENDING,
+            'identity_verified_via'    => null,
+            'verification_expires_at'  => now()->addDays(Member::COUNTER_VERIFICATION_DAYS),
+            'verification_rejection_reason' => null,
+        ], null];
+    }
+
     /**
      * Tampilkan formulir registrasi lanjutan bagi calon anggota dari Google OAuth.
      */
@@ -48,7 +165,11 @@ class MemberRegisterController extends Controller
 
         // Validasi seluruh inputan form wajib
         $validated = $request->validate([
-            'nik'                 => ['required', 'digits:16', 'unique:members,nik'],
+            'nik'                 => ['required', 'digits:16', function ($attribute, $value, $fail) {
+                if ($this->identityNumberOwner('nik', (string) $value)) {
+                    $fail('NIK ini sudah terdaftar sebagai anggota perpustakaan.');
+                }
+            }],
             'name'                => ['required', 'string', 'max:255'],
             'place_of_birth'      => ['required', 'string', 'max:255'],
             'date_of_birth'       => ['required', 'date', 'before:today'],
@@ -58,7 +179,6 @@ class MemberRegisterController extends Controller
             'institution_name'    => ['required', 'string', 'max:255'],
             'phone_number'        => ['required', 'string', 'max:25'],
             'photo'               => ['required', 'image', 'mimes:jpeg,png,jpg', 'max:2048'],
-            'ktp_photo'           => ['required', 'image', 'mimes:jpeg,png,jpg', 'max:2048'],
         ], [
             'nik.required'                 => 'Nomor Induk Kependudukan (NIK) wajib diisi.',
             'nik.digits'                   => 'NIK harus berjumlah tepat 16 digit angka.',
@@ -77,10 +197,6 @@ class MemberRegisterController extends Controller
             'photo.image'                  => 'File yang diunggah harus berupa gambar.',
             'photo.mimes'                  => 'Format gambar yang diperbolehkan: jpeg, png, jpg.',
             'photo.max'                    => 'Ukuran maksimal file gambar adalah 2MB.',
-            'ktp_photo.required'           => 'Foto dokumen identitas resmi (e-KTP / KIA / Kartu Pelajar / Kartu Keluarga) wajib diunggah untuk verifikasi keanggotaan online.',
-            'ktp_photo.image'              => 'Berkas foto dokumen identitas harus berupa gambar.',
-            'ktp_photo.mimes'              => 'Format gambar identitas yang diperbolehkan: jpeg, png, jpg.',
-            'ktp_photo.max'                => 'Ukuran foto dokumen identitas maksimal 2MB.',
         ]);
 
         // Cek apakah email sudah terdaftar sebelumnya (antisipasi double submit)
@@ -105,19 +221,9 @@ class MemberRegisterController extends Controller
             }
         }
 
-        // Handle File Upload KTP Bali
-        $ktpPhotoPath = null;
-        if ($request->hasFile('ktp_photo')) {
-            $ktpFile = $request->file('ktp_photo');
-            if ($ktpFile && $ktpFile->isValid()) {
-                $ktpFilename = 'ktp_' . Str::random(24) . '.' . $ktpFile->getClientOriginalExtension();
-                \Illuminate\Support\Facades\Storage::disk('public')->put(
-                    'ktp-verifications/' . $ktpFilename,
-                    file_get_contents($ktpFile->getPathname())
-                );
-                $ktpPhotoPath = '/storage/ktp-verifications/' . $ktpFilename;
-            }
-        }
+        // Foto dokumen identitas TIDAK diunggah maupun disimpan. Formulir ini tidak punya pemeriksaan
+        // NIK online, jadi akun menunggu verifikasi tatap muka di DAPD Buleleng.
+        [$verification] = $this->verificationAttributes('counter', [], false);
 
         // Auto-generate member_no unik (format: MEM-YYYYMM-XXXX)
         $memberNo = Member::generateMemberNo();
@@ -137,11 +243,10 @@ class MemberRegisterController extends Controller
             'email'               => $googleUser['email'],
             'password'            => Hash::make(Str::random(16)),
             'photo_path'          => $photoPath,
-            'ktp_photo_path'      => $ktpPhotoPath,
-            'status'              => 'Menunggu Verifikasi',
             'max_loans'           => 3,
             'google_id'           => $googleUser['google_id'] ?? null,
             'avatar'              => $googleUser['photo_path'] ?? null,
+            ...$verification,
         ]);
 
         // Hapus session temporer Google setelah berhasil
@@ -159,7 +264,8 @@ class MemberRegisterController extends Controller
         }
 
         // Redirect ke /member/dashboard
-        return redirect('/member/dashboard')->with('success', 'Selamat! Registrasi anggota berhasil. Nomor anggota Anda: ' . $member->member_no);
+        return redirect('/member/dashboard')->with('success', 'Pendaftaran diterima. Nomor anggota Anda: ' . $member->member_no
+            . '. Datang ke DAPD Buleleng membawa KTP asli sebelum ' . $member->verification_expires_at->locale('id')->translatedFormat('d F Y') . ' untuk verifikasi keanggotaan.');
     }
 
     /**
@@ -206,10 +312,8 @@ class MemberRegisterController extends Controller
             $input['photo'] = $photoFile;
         }
 
-        $ktpFile = $request->file('ktp_photo') ?? $request->file('ktpPhoto') ?? $request->file('foto_ktp') ?? $request->file('fotoKtp');
-        if ($ktpFile) {
-            $input['ktp_photo'] = $ktpFile;
-        }
+        // Foto dokumen identitas (ktp_photo dan alias-nya) sengaja DIABAIKAN: tidak divalidasi, tidak
+        // disimpan. Pemeriksaan NIK terhadap foto dilakukan di browser pendaftar, dan foto tidak dikirim.
 
         // Cek jika tempatTanggalLahir dikirim dalam satu string (misal: "Singaraja, 2000-05-15")
         if ((empty($input['place_of_birth']) || empty($input['date_of_birth'])) && !empty($input['tempatTanggalLahir'])) {
@@ -237,20 +341,36 @@ class MemberRegisterController extends Controller
             $emailRule[] = 'unique:members,email';
         }
 
-        $nikRule = ['required', 'string', 'digits:16'];
-        if ($isExistingGoogleOrUpdating) {
-            $nikRule[] = \Illuminate\Validation\Rule::unique('members', 'nik')->ignore($existingMember->id);
-        } else {
-            $nikRule[] = 'unique:members,nik';
+        // Jenis nomor mengikuti kartu yang dipilih: KTP/KIA → NIK, KTM → NIM, Kartu Pelajar → NISN.
+        // Nomornya tetap dikirim dan disimpan pada field `nik`.
+        $documentType = $input['identity_document_type'] ?? $existingMember?->identity_document_type;
+        $numberKind = Member::identityNumberKind(is_string($documentType) ? $documentType : null);
+        $numberLabel = Member::IDENTITY_NUMBER_RULES[$numberKind]['label'];
+        if (! isset($input['nik']) && isset($input['identity_number'])) {
+            $input['nik'] = $input['identity_number'];
         }
+        if (isset($input['nik']) && is_scalar($input['nik'])) {
+            $input['nik'] = Member::normalizeIdentityNumber($numberKind, $input['nik']);
+        }
+
+        $nikRule = ['required', 'string', function ($attribute, $value, $fail) use ($numberKind, $existingMember) {
+            if ($error = Member::identityNumberError($numberKind, (string) $value)) {
+                $fail($error);
+            } elseif ($this->identityNumberOwner($numberKind, (string) $value, $existingMember?->id)) {
+                $fail($this->numberTakenMessage($numberKind));
+            }
+        }];
+
+        // Akun yang sudah aktif (mis. anggota lama melengkapi data) tidak perlu verifikasi ulang.
+        $existingIsActive = $existingMember && str_starts_with(strtolower((string) $existingMember->status), 'aktif');
+        $mustVerify = ! $existingIsActive;
+        // Verifikasi online hanya untuk pendaftar baru atau akun Google yang belum pernah melengkapi NIK.
+        // Akun yang sudah punya NIK (mis. pernah ditolak petugas) harus diperiksa tatap muka lagi.
+        $onlineAllowed = ! $existingMember || blank($existingMember->nik);
 
         $passwordRule = $isExistingGoogleOrUpdating
             ? ['nullable', 'string', \Illuminate\Validation\Rules\Password::min(8)->mixedCase()->numbers()->symbols()]
             : ['required', 'string', \Illuminate\Validation\Rules\Password::min(8)->mixedCase()->numbers()->symbols()];
-
-        $ktpPhotoRule = ($isExistingGoogleOrUpdating && $existingMember->status === 'Aktif Bebas Pustaka')
-            ? ['nullable', 'image', 'mimes:jpeg,png,jpg', 'max:2048']
-            : ['required', 'image', 'mimes:jpeg,png,jpg', 'max:2048'];
 
         $validator = \Illuminate\Support\Facades\Validator::make($input, [
             'nik'                 => $nikRule,
@@ -265,11 +385,21 @@ class MemberRegisterController extends Controller
             'institution_name'    => ['nullable', 'string', 'max:255'],
             'phone_number'        => ['nullable', 'string', 'max:25'],
             'photo'               => ['nullable', 'image', 'mimes:jpeg,png,jpg', 'max:2048'],
-            'ktp_photo'           => $ktpPhotoRule,
+            'data_consent'        => ['accepted'],
+            'verification_mode'   => [$mustVerify ? 'required' : 'nullable', 'in:online,counter'],
+            'counter_agreement'   => ['required_if:verification_mode,counter', 'accepted_if:verification_mode,counter'],
+            'identity_document_type' => [$mustVerify ? 'required' : 'nullable', 'in:' . implode(',', self::IDENTITY_DOCUMENT_TYPES)],
+            'identity_ocr_status'    => ['nullable', 'in:' . implode(',', self::IDENTITY_OCR_STATUSES)],
+            'identity_ocr_result'    => ['nullable', 'string', 'max:1000'],
         ], [
-            'nik.required'          => 'Nomor Induk Kependudukan (NIK) wajib diisi.',
-            'nik.digits'            => 'NIK harus berjumlah tepat 16 digit angka.',
-            'nik.unique'            => 'NIK ini sudah terdaftar sebagai anggota perpustakaan.',
+            'identity_document_type.required' => 'Pilih kartu yang digunakan: KTP, KIA, KTM, atau Kartu Pelajar.',
+            'identity_document_type.in' => 'Kartu yang dapat digunakan hanya KTP, KIA, KTM, atau Kartu Pelajar.',
+            'verification_mode.required' => "Pilih cara verifikasi {$numberLabel}: verifikasi online, atau datang ke DAPD Buleleng.",
+            'verification_mode.in'       => 'Cara verifikasi tidak dikenali.',
+            'counter_agreement.required_if' => 'Centang persetujuan untuk datang ke DAPD Buleleng agar pendaftaran dapat diproses.',
+            'counter_agreement.accepted_if' => 'Centang persetujuan untuk datang ke DAPD Buleleng agar pendaftaran dapat diproses.',
+            'data_consent.accepted' => 'Anda harus menyetujui Persetujuan Pemrosesan Data Pribadi untuk mendaftar.',
+            'nik.required'          => "{$numberLabel} wajib diisi.",
             'name.required'         => 'Nama lengkap wajib diisi.',
             'email.required'        => 'Email wajib diisi.',
             'email.email'           => 'Format email tidak valid.',
@@ -285,10 +415,6 @@ class MemberRegisterController extends Controller
             'photo.image'           => 'File pas foto harus berupa gambar.',
             'photo.mimes'           => 'Format gambar pas foto yang diperbolehkan: jpeg, png, jpg.',
             'photo.max'             => 'Ukuran maksimal file pas foto adalah 2MB.',
-            'ktp_photo.required'    => 'Foto dokumen identitas resmi (e-KTP / KIA / Kartu Pelajar / Kartu Keluarga) wajib diunggah untuk verifikasi keanggotaan online.',
-            'ktp_photo.image'       => 'Berkas foto dokumen identitas harus berupa gambar.',
-            'ktp_photo.mimes'       => 'Format gambar identitas yang diperbolehkan: jpeg, png, jpg.',
-            'ktp_photo.max'         => 'Ukuran foto dokumen identitas maksimal 2MB.',
         ]);
 
         if ($validator->fails()) {
@@ -300,6 +426,21 @@ class MemberRegisterController extends Controller
         }
 
         $validated = $validator->validated();
+        $identityOcr = $this->sanitizeIdentityOcr($validated);
+        $mode = $validated['verification_mode'] ?? null;
+
+        $verification = [];
+        if ($mustVerify) {
+            [$verification, $verificationError] = $this->verificationAttributes($mode, $identityOcr, $onlineAllowed);
+            if ($verificationError) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $verificationError,
+                    'errors'  => ['verification_mode' => [$verificationError]],
+                ], 422);
+            }
+            $verification = array_merge($verification, $identityOcr);
+        }
 
         // Handle File Upload Pas Foto
         $photoPath = null;
@@ -310,17 +451,6 @@ class MemberRegisterController extends Controller
                 file_get_contents($photoFile->getPathname())
             );
             $photoPath = '/storage/photos/members/' . $filename;
-        }
-
-        // Handle File Upload KTP Bali
-        $ktpPhotoPath = null;
-        if ($ktpFile && $ktpFile->isValid()) {
-            $ktpFilename = 'ktp_' . Str::random(24) . '.' . $ktpFile->getClientOriginalExtension();
-            \Illuminate\Support\Facades\Storage::disk('public')->put(
-                'ktp-verifications/' . $ktpFilename,
-                file_get_contents($ktpFile->getPathname())
-            );
-            $ktpPhotoPath = '/storage/ktp-verifications/' . $ktpFilename;
         }
 
         if ($existingMember) {
@@ -335,6 +465,8 @@ class MemberRegisterController extends Controller
                 'institution_name'    => $validated['institution_name'] ?? $existingMember->institution_name,
                 'phone_number'        => $validated['phone_number'] ?? $existingMember->phone_number,
                 'max_loans'           => 3,
+                'data_consent_at'      => now(),
+                'data_consent_version' => self::DATA_CONSENT_VERSION,
             ];
             if (!empty($validated['password'])) {
                 $updateData['password'] = Hash::make($validated['password']);
@@ -342,14 +474,12 @@ class MemberRegisterController extends Controller
             if ($photoPath) {
                 $updateData['photo_path'] = $photoPath;
             }
-            if ($ktpPhotoPath) {
-                $updateData['ktp_photo_path'] = $ktpPhotoPath;
-                $updateData['status'] = 'Menunggu Verifikasi';
-                $updateData['verification_rejection_reason'] = null;
-            } elseif (empty($existingMember->status) || $existingMember->status === 'Ditolak') {
-                $updateData['status'] = 'Menunggu Verifikasi';
-                $updateData['verification_rejection_reason'] = null;
+            // Jenis kartu harus selalu sejalan dengan jenis nomor yang tersimpan di kolom `nik`
+            if (! empty($validated['identity_document_type'])) {
+                $updateData['identity_document_type'] = $validated['identity_document_type'];
             }
+            // Status akun hanya berubah bila akun belum aktif (lihat $mustVerify)
+            $updateData = array_merge($updateData, $verification);
             if (empty($existingMember->member_no)) {
                 $updateData['member_no'] = Member::generateMemberNo();
             }
@@ -375,22 +505,38 @@ class MemberRegisterController extends Controller
                 'institution_name'    => $validated['institution_name'] ?? null,
                 'phone_number'        => $validated['phone_number'] ?? null,
                 'photo_path'          => $photoPath,
-                'ktp_photo_path'      => $ktpPhotoPath,
-                'status'              => 'Menunggu Verifikasi',
                 'max_loans'           => 3,
+                'data_consent_at'      => now(),
+                'data_consent_version' => self::DATA_CONSENT_VERSION,
+                ...$verification,
             ]);
         }
 
         // Buat token autentikasi Sanctum
         $token = $member->createToken('member-auth-token')->plainTextToken;
 
+        if (! $mustVerify) {
+            $message = 'Data anggota berhasil diperbarui.';
+        } elseif ($mode === 'online') {
+            $message = "Registrasi berhasil! {$numberLabel} Anda terverifikasi dan akun anggota sudah aktif.";
+        } else {
+            $message = 'Pendaftaran diterima, tetapi akun belum aktif. Datang ke DAPD Buleleng dan tunjukkan kartu identitas asli Anda (KTP / KIA / KTM / Kartu Pelajar) sebelum '
+                . $member->verification_expires_at->locale('id')->translatedFormat('d F Y')
+                . ' untuk verifikasi keanggotaan. Akun dihapus bila verifikasi ditolak atau tidak dilakukan sampai batas waktu tersebut.';
+        }
+
         return response()->json([
             'success' => true,
-            'message' => 'Registrasi anggota berhasil! Akun Anda sedang dalam antrean verifikasi KTP Bali oleh petugas.',
+            'message' => $message,
             'token'   => $token,
             'data'    => [
                 'token'  => $token,
                 'member' => new \App\Http\Resources\MemberResource($member),
+                'verification' => [
+                    'mode'       => $mustVerify ? $mode : null,
+                    'status'     => $member->status,
+                    'expires_at' => $member->verification_expires_at?->toIso8601String(),
+                ],
             ],
         ], 201);
     }

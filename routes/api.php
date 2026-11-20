@@ -206,6 +206,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/books', [BookManagementController::class, 'index']);
             Route::get('/books/{id}', [BookManagementController::class, 'show']);
             Route::get('/collections', [BookManagementController::class, 'listCollections']);
+            Route::get('/collections/locations', [BookManagementController::class, 'listCollectionLocations']);
             Route::get('/members', [MemberManagementController::class, 'index']);
             Route::get('/members/pending-verifications', [MemberManagementController::class, 'pendingVerifications']);
             Route::get('/members/next-number', [MemberManagementController::class, 'nextNumber']);

@@ -526,6 +526,29 @@ class BookManagementController extends Controller
     /**
      * Menampilkan daftar seluruh eksemplar fisik buku beserta relasi katalog, pencarian, dan metrik ringkasan.
      */
+    /**
+     * Daftar lokasi penyimpanan yang benar-benar tercatat pada eksemplar, untuk pilihan filter "Lokasi Ruang / Rak"
+     * di Daftar Koleksi. Hanya eksemplar yang tampil di daftar utama (bukan karantina) yang dihitung.
+     */
+    public function listCollectionLocations(): JsonResponse
+    {
+        $locations = Collection::query()
+            ->where('is_quarantine', false)
+            ->where('availability_status', '!=', 'QUARANTINED')
+            ->whereNotNull('room_location_code')
+            ->where('room_location_code', '!=', '')
+            ->selectRaw('room_location_code as name, COUNT(*) as total')
+            ->groupBy('room_location_code')
+            ->orderBy('room_location_code')
+            ->get()
+            ->map(fn ($row) => ['name' => $row->name, 'total' => (int) $row->total]);
+
+        return response()->json([
+            'success' => true,
+            'data'    => $locations,
+        ]);
+    }
+
     public function listCollections(Request $request): JsonResponse
     {
         $query = Collection::with('catalog');
@@ -533,19 +556,29 @@ class BookManagementController extends Controller
         // Search filter (across barcode, item_number, rfid_no, and catalog title, author, isbn)
         if ($request->filled('search')) {
             $search = $request->search;
-            $query->where(function ($q) use ($search) {
-                $q->where('barcode_no', 'like', "%{$search}%")
-                    ->orWhere('item_number', 'like', "%{$search}%")
-                    ->orWhere('rfid_no', 'like', "%{$search}%")
-                    ->orWhere('exemplar_call_number', 'like', "%{$search}%")
-                    ->orWhereHas('catalog', function ($cq) use ($search) {
-                        $cq->where('title', 'like', "%{$search}%")
-                            ->orWhere('subtitle', 'like', "%{$search}%")
-                            ->orWhere('author_main', 'like', "%{$search}%")
-                            ->orWhere('publisher', 'like', "%{$search}%")
-                            ->orWhere('isbn', 'like', "%{$search}%");
-                    });
-            });
+            // search_column membatasi pencarian ke satu kolom (pilihan di Daftar Koleksi); kosong/"all" = semua kolom
+            $column = $request->input('search_column', 'all');
+            $like = "%{$search}%";
+            match ($column) {
+                'barcode' => $query->where(fn ($q) => $q->where('barcode_no', 'like', $like)->orWhere('item_number', 'like', $like)),
+                'rfid'    => $query->where('rfid_no', 'like', $like),
+                'title'   => $query->whereHas('catalog', fn ($cq) => $cq->where('title', 'like', $like)->orWhere('subtitle', 'like', $like)),
+                'author'  => $query->whereHas('catalog', fn ($cq) => $cq->where('author_main', 'like', $like)),
+                'isbn'    => $query->whereHas('catalog', fn ($cq) => $cq->where('isbn', 'like', $like)),
+                default   => $query->where(function ($q) use ($like) {
+                    $q->where('barcode_no', 'like', $like)
+                        ->orWhere('item_number', 'like', $like)
+                        ->orWhere('rfid_no', 'like', $like)
+                        ->orWhere('exemplar_call_number', 'like', $like)
+                        ->orWhereHas('catalog', function ($cq) use ($like) {
+                            $cq->where('title', 'like', $like)
+                                ->orWhere('subtitle', 'like', $like)
+                                ->orWhere('author_main', 'like', $like)
+                                ->orWhere('publisher', 'like', $like)
+                                ->orWhere('isbn', 'like', $like);
+                        });
+                }),
+            };
         }
 
         // Filter status karantina vs aktif (Daftar Koleksi utama menyembunyikan koleksi/katalog yang dikarantina)
@@ -573,6 +606,9 @@ class BookManagementController extends Controller
                     $query->where('availability_status', 'BORROWED');
                 } elseif ($status === 'BINDING' || $status === 'MAINTENANCE' || $status === 'Proses Binding') {
                     $query->where('availability_status', 'MAINTENANCE');
+                } elseif ($status === 'HILANG' || $status === 'Hilang') {
+                    // "Hilang" bukan status ketersediaan, melainkan kondisi fisik eksemplar
+                    $query->where('physical_condition', 'like', 'hilang');
                 } else {
                     $query->where('availability_status', $status);
                 }
@@ -588,8 +624,10 @@ class BookManagementController extends Controller
         }
 
         // Filter room location
+        // Pilihan lokasi diambil dari listCollectionLocations, jadi dicocokkan persis
+        // (LIKE membuat "Mobil Putih" ikut memuat "Mobil Putih Rolling").
         if ($request->filled('room_location') && $request->room_location !== 'all' && $request->room_location !== 'Semua Lokasi Penyimpanan') {
-            $query->where('room_location_code', 'like', "%{$request->room_location}%");
+            $query->where('room_location_code', $request->room_location);
         }
 
         // Filter year
@@ -601,6 +639,20 @@ class BookManagementController extends Controller
                       $cq->where('publish_year', $year);
                   });
             });
+        }
+
+        // Rentang tahun pengadaan (filter "Tahun pengadaan" di Daftar Koleksi). Hanya tahun pengadaan eksemplar,
+        // bukan tahun terbit buku. Boleh diisi salah satu saja.
+        $yearFrom = $request->integer('year_from');
+        $yearTo   = $request->integer('year_to');
+        if ($yearFrom && $yearTo && $yearFrom > $yearTo) {
+            [$yearFrom, $yearTo] = [$yearTo, $yearFrom];
+        }
+        if ($yearFrom) {
+            $query->whereYear('procurement_date', '>=', $yearFrom);
+        }
+        if ($yearTo) {
+            $query->whereYear('procurement_date', '<=', $yearTo);
         }
 
         $perPage = (int) $request->input('per_page', 10);

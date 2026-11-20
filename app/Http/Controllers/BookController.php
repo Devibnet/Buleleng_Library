@@ -148,7 +148,12 @@ class BookController extends Controller
                 $query->orderBy('id', 'desc');
         }
 
-        $catalogs = $query->paginate(15);
+        // Jumlah per halaman dari pilihan OPAC; nilai lain dikembalikan ke 15 supaya endpoint publik tidak bisa diminta ribuan baris
+        $perPage = (int) $request->input('per_page', 15);
+        if (! in_array($perPage, [15, 30, 50], true)) {
+            $perPage = 15;
+        }
+        $catalogs = $query->paginate($perPage);
 
         return response()->json([
             'success' => true,

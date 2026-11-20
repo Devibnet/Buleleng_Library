@@ -168,13 +168,16 @@ class MemberManagementController extends Controller
                     $fail('NIK ini sudah terdaftar sebagai anggota perpustakaan.');
                 }
             }],
-            'email'               => ['nullable', 'email', 'max:255', 'unique:members,email'],
+            'email'               => ['required', 'email', 'max:255', 'unique:members,email'],
             'photo'               => ['nullable'],
             'status'              => ['nullable', 'string', 'max:50'],
         ], [
             'nik.required'                 => 'Nomor Induk Kependudukan (NIK) wajib diisi.',
             'nik.digits'                   => 'NIK harus berjumlah tepat 16 digit angka.',
             'nik.unique'                   => 'NIK ini sudah terdaftar sebagai anggota perpustakaan.',
+            'email.required'               => 'Alamat email wajib diisi untuk pendaftaran akun anggota.',
+            'email.email'                  => 'Format alamat email tidak valid.',
+            'email.unique'                 => 'Alamat email ini sudah terdaftar untuk anggota lain.',
             'name.required'                => 'Nama lengkap wajib diisi sesuai identitas resmi.',
             'gender.required'              => 'Jenis kelamin wajib dipilih (Laki-Laki atau Perempuan).',
             'gender.in'                    => 'Pilihan jenis kelamin harus L (Laki-Laki) atau P (Perempuan).',
@@ -240,39 +243,44 @@ class MemberManagementController extends Controller
             }
         }
 
-        // Email: Tidak auto-generate. Jika kosong simpan null
-        $email = !empty($validated['email']) ? trim($validated['email']) : null;
+        // Email: Wajib dan dinormalisasi huruf kecil
+        $email = strtolower(trim($validated['email']));
+
+        // Auto-generate temporary password for offline registration
+        $autoPassword = 'Atlas-' . strtoupper(Str::random(4)) . rand(100, 999) . '!';
 
         // Valid until date (5 years from creation)
         $validUntil = now()->addYears(5)->format('Y-m-d');
 
         $member = Member::create([
-            'member_no'           => $memberNo,
-            'nik'                 => $validated['nik'] ?? null,
-            'name'                => $validated['name'],
-            'gender'              => $validated['gender'],
-            'place_of_birth'      => $validated['place_of_birth'],
-            'date_of_birth'       => $validated['date_of_birth'],
-            'job_category'        => $jobCategory,
-            'institution_name'    => $validated['institution_name'],
-            'max_loans'           => $maxLoans,
-            'phone_number'        => $validated['phone_number'],
-            'email'               => $email,
-            'password'            => Hash::make('atlas123456'),
-            'ktp_address'         => $validated['ktp_address'],
-            'residential_address' => $validated['residential_address'],
-            'photo_path'          => $photoPath,
-            'ktp_photo_path'      => null,
-            'status'              => $validated['status'] ?? 'Aktif Bebas Pustaka',
-            'valid_until'         => $validUntil,
-            'ktp_verified_at'     => now(),
-            'ktp_verified_by'     => auth()->id(),
+            'member_no'            => $memberNo,
+            'nik'                  => $validated['nik'] ?? null,
+            'name'                 => $validated['name'],
+            'gender'               => $validated['gender'],
+            'place_of_birth'       => $validated['place_of_birth'],
+            'date_of_birth'        => $validated['date_of_birth'],
+            'job_category'         => $jobCategory,
+            'institution_name'     => $validated['institution_name'],
+            'max_loans'            => $maxLoans,
+            'phone_number'         => $validated['phone_number'],
+            'email'                => $email,
+            'password'             => Hash::make($autoPassword),
+            'must_change_password' => true,
+            'ktp_address'          => $validated['ktp_address'],
+            'residential_address'  => $validated['residential_address'],
+            'photo_path'           => $photoPath,
+            'ktp_photo_path'       => null,
+            'status'               => $validated['status'] ?? 'Aktif Bebas Pustaka',
+            'valid_until'          => $validUntil,
+            'ktp_verified_at'      => now(),
+            'ktp_verified_by'      => auth()->id(),
         ]);
 
         return response()->json([
-            'success' => true,
-            'message' => "Anggota {$member->name} ({$member->member_no}) berhasil didaftarkan!",
-            'data'    => new MemberResource($member),
+            'success'            => true,
+            'message'            => "Anggota {$member->name} ({$member->member_no}) berhasil didaftarkan!",
+            'data'               => new MemberResource($member),
+            'generated_password' => $autoPassword,
         ], 201);
     }
 

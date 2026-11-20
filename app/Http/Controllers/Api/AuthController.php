@@ -73,7 +73,7 @@ class AuthController extends Controller
         if (! $passwordValid) {
             return response()->json([
                 'success' => false,
-                'message' => 'Kata sandi salah. Untuk pendaftaran offline di loket, gunakan kata sandi awal atlas123456 atau tanggal lahir Anda (format DDMMYYYY).',
+                'message' => 'Kata sandi salah. Silakan periksa kembali kata sandi yang Anda masukkan.',
             ], 401);
         }
 
@@ -85,13 +85,53 @@ class AuthController extends Controller
         session()->forget('intended_book_id');
 
         return response()->json([
-            'success'          => true,
-            'message'          => 'Login member berhasil.',
-            'intended_book_id' => $intendedBookId,
-            'token'            => $token,
-            'data'             => [
-                'token'  => $token,
-                'member' => new MemberResource($member),
+            'success'              => true,
+            'message'              => 'Login member berhasil.',
+            'intended_book_id'     => $intendedBookId,
+            'token'                => $token,
+            'must_change_password' => (bool) $member->must_change_password,
+            'data'                 => [
+                'token'                => $token,
+                'must_change_password' => (bool) $member->must_change_password,
+                'member'               => new MemberResource($member),
+            ],
+        ], 200);
+    }
+
+    /**
+     * POST /api/auth/member/force-change-password
+     * Wajib ganti kata sandi pertama kali untuk anggota pendaftaran offline
+     */
+    public function forceChangePassword(Request $request): JsonResponse
+    {
+        $member = $request->user();
+
+        if (! $member instanceof Member) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated.',
+            ], 401);
+        }
+
+        $validated = $request->validate([
+            'password' => ['required', 'string', 'min:8', 'confirmed'],
+        ], [
+            'password.required'  => 'Kata sandi baru wajib diisi.',
+            'password.min'       => 'Kata sandi minimal 8 karakter.',
+            'password.confirmed' => 'Konfirmasi kata sandi tidak cocok.',
+        ]);
+
+        $member->update([
+            'password'             => Hash::make($validated['password']),
+            'must_change_password' => false,
+            'password_changed_at'  => now(),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Kata sandi berhasil diperbarui. Anda sekarang dapat menggunakan seluruh layanan perpustakaan.',
+            'data'    => [
+                'member' => new MemberResource($member->fresh()),
             ],
         ], 200);
     }

@@ -163,18 +163,18 @@ class LoanService
             $today = now()->startOfDay();
             $dueDate = $loan->due_date ? $loan->due_date->startOfDay() : $today;
             $lateDays = 0;
+            // Bebas denda untuk seluruh anggota
             $fineAmount = 0;
 
             if ($today->greaterThan($dueDate)) {
                 $lateDays = (int) $today->diffInDays($dueDate);
-                $fineAmount = $lateDays * 1000;
             }
 
             $loan->update([
                 'status'              => Loan::STATUS_RETURNED,
                 'return_date'         => now()->toDateString(),
                 'late_days'           => $lateDays,
-                'fine_amount'         => $fineAmount,
+                'fine_amount'         => 0,
                 'returned_by_user_id' => $operatorAdminId,
             ]);
 

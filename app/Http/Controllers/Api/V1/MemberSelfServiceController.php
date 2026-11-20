@@ -161,7 +161,7 @@ class MemberSelfServiceController extends Controller
                     'active'        => $active->count(),
                     'overdue'       => $active->where('state', 'overdue')->count(),
                     'due_soon'      => $active->filter(fn ($l) => $l['days_left'] !== null && $l['days_left'] >= 0 && $l['days_left'] <= 2)->count(),
-                    'fine_estimate' => (float) $active->sum('fine'),
+                    'fine_estimate' => 0,
                     'returned'      => $loans->where('status', Loan::STATUS_RETURNED)->count(),
                 ],
                 'loans'       => $loans->values(),
@@ -293,9 +293,8 @@ class MemberSelfServiceController extends Controller
             default                                 => 'on_time',
         };
 
-        $fine = $isActive
-            ? max(0, -($daysLeft ?? 0)) * (float) get_setting('fine_per_day', 1000)
-            : (float) $loan->fine_amount;
+        // Kebijakan DAPD Buleleng: Bebas denda uang untuk anggota
+        $fine = 0;
 
         return [
             'id'               => $loan->id,
@@ -309,7 +308,7 @@ class MemberSelfServiceController extends Controller
             'return_date'      => $loan->return_date?->toDateString(),
             'days_left'        => $daysLeft,
             'late_days'        => $isActive ? max(0, -($daysLeft ?? 0)) : (int) $loan->late_days,
-            'fine'             => $fine,
+            'fine'             => 0,
             'extension_count'  => (int) $loan->extension_count,
         ];
     }

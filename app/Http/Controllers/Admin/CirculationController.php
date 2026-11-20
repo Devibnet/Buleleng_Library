@@ -123,7 +123,7 @@ class CirculationController extends Controller
 
             $msg = "Buku untuk transaksi {$updatedLoan->loan_number} telah berhasil dikembalikan.";
             if ($updatedLoan->late_days > 0) {
-                $msg .= " Terlambat {$updatedLoan->late_days} hari. Denda: Rp " . number_format($updatedLoan->fine_amount, 0, ',', '.');
+                $msg .= " Terlambat {$updatedLoan->late_days} hari (Bebas denda).";
             }
 
             return redirect()->back()->with('success', $msg);

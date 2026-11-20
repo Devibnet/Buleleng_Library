@@ -24,7 +24,7 @@ class LoanResource extends JsonResource
             'due_date'         => $this->due_date?->toDateString(),
             'return_date'      => $this->return_date?->toDateString(),
             'late_days'        => (int) $this->late_days,
-            'fine_amount'      => (float) $this->fine_amount,
+            'fine_amount'      => 0,
             'created_by'       => $this->createdByAdmin?->name,
             'returned_by'      => $this->returnedByAdmin?->name,
             'created_at'       => $this->created_at?->toIso8601String(),

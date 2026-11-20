@@ -133,12 +133,9 @@ class ReturnController extends Controller
         }
 
         $loans->each->load(['member', 'collection.catalog', 'returnedByAdmin']);
-        $totalFine = (float) $loans->sum('fine_amount');
+        $totalFine = 0;
 
         $message = "Pengembalian {$loans->count()} eksemplar berhasil diproses.";
-        if ($totalFine > 0) {
-            $message .= ' Total denda keterlambatan: Rp ' . number_format($totalFine, 0, ',', '.') . '.';
-        }
 
         return response()->json([
             'success' => true,
@@ -146,7 +143,7 @@ class ReturnController extends Controller
             'data'    => [
                 'member'     => $this->memberPayload($loans->first()->member),
                 'loans'      => LoanResource::collection($loans),
-                'total_fine' => $totalFine,
+                'total_fine' => 0,
             ],
         ], 201);
     }
@@ -189,7 +186,7 @@ class ReturnController extends Controller
             'loan_date'     => $loan->loan_date?->toDateString(),
             'due_date'      => $loan->due_date?->toDateString(),
             'late_days'     => $lateDays,
-            'fine_estimate' => $lateDays * (float) get_setting('fine_per_day', 1000),
+            'fine_estimate' => 0,
         ];
     }
 }

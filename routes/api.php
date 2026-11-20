@@ -48,6 +48,7 @@ Route::post('/auth/register', [MemberRegisterController::class, 'registerApi']);
 Route::post('/auth/member/register', [MemberRegisterController::class, 'registerApi']);
 Route::post('/member/register', [MemberRegisterController::class, 'registerApi']);
 Route::post('/auth/member/check-nik', [MemberRegisterController::class, 'checkNik'])->middleware('throttle:15,1');
+Route::post('/auth/member/force-change-password', [AuthController::class, 'forceChangePassword'])->middleware('auth:sanctum');
 
 // Public Guestbook Endpoints (Bisa diakses tanpa login di root /api/guestbooks)
 Route::prefix('guestbooks')->group(function () {
@@ -122,6 +123,7 @@ Route::prefix('v1')->group(function () {
     Route::post('/auth/member/register', [MemberRegisterController::class, 'registerApi']);
     // Cek NIK ganda secara langsung dari form pendaftaran (dibatasi 15 permintaan/menit per IP)
     Route::post('/auth/member/check-nik', [MemberRegisterController::class, 'checkNik'])->middleware('throttle:15,1');
+    Route::post('/auth/member/force-change-password', [AuthController::class, 'forceChangePassword'])->middleware('auth:sanctum');
     Route::post('/auth/admin/login', [AuthController::class, 'loginAdmin']);
 
     // Reset password petugas via link dari Super Admin (publik, dibatasi 10 permintaan/menit per IP)

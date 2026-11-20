@@ -58,6 +58,7 @@ class MemberResource extends JsonResource
             'ktp_verified_at'               => $this->ktp_verified_at ? $this->ktp_verified_at->toIso8601String() : null,
             'ktp_verified_by'               => $this->ktp_verified_by,
             'verification_rejection_reason' => $this->verification_rejection_reason,
+            'must_change_password'          => (bool) $this->must_change_password,
             'identity_document_type'        => $this->identity_document_type,
             'identity_ocr_status'           => $this->identity_ocr_status,
             'identity_ocr_result'           => $this->identity_ocr_result,

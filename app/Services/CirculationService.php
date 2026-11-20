@@ -347,12 +347,11 @@ class CirculationService
             $today = now()->startOfDay();
             $dueDate = $loan->due_date ? $loan->due_date->startOfDay() : $today;
             $lateDays = 0;
+            // Kebijakan DAPD Buleleng: Bebas denda untuk seluruh anggota
             $fineAmount = 0;
 
             if ($today->greaterThan($dueDate)) {
                 $lateDays = (int) $dueDate->diffInDays($today);
-                $fineRate = (float) get_setting('fine_per_day', 1000);
-                $fineAmount = $lateDays * $fineRate;
             }
 
             // Ubah status loan = RETURNED, set return_date = now
@@ -360,7 +359,7 @@ class CirculationService
                 'status'              => Loan::STATUS_RETURNED,
                 'return_date'         => now()->toDateString(),
                 'late_days'           => $lateDays,
-                'fine_amount'         => $fineAmount,
+                'fine_amount'         => 0,
                 'returned_by_user_id' => $operatorAdminId,
             ]);
 

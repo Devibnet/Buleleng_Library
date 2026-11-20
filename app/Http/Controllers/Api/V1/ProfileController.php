@@ -429,7 +429,9 @@ class ProfileController extends Controller
         }
 
         $member->update([
-            'password' => Hash::make($validated['password']),
+            'password'             => Hash::make($validated['password']),
+            'must_change_password' => false,
+            'password_changed_at'  => now(),
         ]);
 
         return response()->json([
@@ -505,7 +507,7 @@ class ProfileController extends Controller
 
         $openCases = $member->memberCarts()->where('is_resolved', false)->count();
         if ($openCases > 0) {
-            return $this->deleteBlocked("Akun belum bisa dihapus karena masih ada {$openCases} kasus di Keranjang Bermasalah (misalnya denda atau buku rusak/hilang). Selesaikan dulu di loket DAPD Buleleng.");
+            return $this->deleteBlocked("Akun belum bisa dihapus karena masih ada {$openCases} kasus di Keranjang Bermasalah (misalnya buku belum dikembalikan atau rusak/hilang). Selesaikan dulu di loket DAPD Buleleng.");
         }
 
         $activeLockers = $member->lockerLoans()->whereIn('status', ['ACTIVE', 'OVERDUE', 'VIOLATION'])->count();

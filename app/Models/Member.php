@@ -223,6 +223,8 @@ class Member extends Authenticatable
         'identity_ocr_result',
         'identity_verified_via',
         'verification_expires_at',
+        'must_change_password',
+        'password_changed_at',
     ];
 
     protected $hidden = [
@@ -298,6 +300,8 @@ class Member extends Authenticatable
             'verification_expires_at' => 'datetime',
             'nik' => 'encrypted',
             'password' => 'hashed',
+            'must_change_password' => 'boolean',
+            'password_changed_at' => 'datetime',
         ];
     }
 

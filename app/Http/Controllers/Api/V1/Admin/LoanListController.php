@@ -230,9 +230,7 @@ class LoanListController extends Controller
             'days_left'       => $daysLeft,
             'state'           => $state,
             'state_label'     => $stateLabel,
-            'fine_estimate'   => $daysLeft !== null && $daysLeft < 0
-                ? abs($daysLeft) * (float) get_setting('fine_per_day', 1000)
-                : 0,
+            'fine_estimate'   => 0,
         ];
     }
 }

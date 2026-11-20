@@ -413,7 +413,7 @@ class ProblemCartController extends Controller
 
         // Jika cicilan lunas dan statusnya dalam mediasi, sesuaikan catatan
         if ($cart->fine_amount > 0 && $newPaidAmount >= $cart->fine_amount) {
-            $updateData['action_notes'] = 'Tagihan denda / ganti rugi lunas';
+            $updateData['action_notes'] = 'Penyelesaian kewajiban buku selesai';
         }
 
         $cart->update($updateData);
@@ -612,8 +612,6 @@ class ProblemCartController extends Controller
 
             if (!$existing) {
                 $days = Carbon::parse($loan->due_date)->diffInDays($today);
-                $fineRate = (float) get_setting('fine_per_day', 1000);
-                $calculatedFine = $days * $fineRate;
 
                 MemberCart::create([
                     'member_id'          => $loan->member_id,

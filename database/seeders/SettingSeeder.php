@@ -27,13 +27,13 @@ class SettingSeeder extends Seeder
             ],
             [
                 'key'   => 'fine_per_day',
-                'value' => '1000',
+                'value' => '0',
                 'group' => 'circulation',
-                'label' => 'Denda Keterlambatan Per Hari',
+                'label' => 'Denda Keterlambatan Per Hari (Bebas Denda)',
             ],
             [
                 'key'   => 'terms_and_conditions',
-                'value' => 'Syarat & Ketentuan Peminjaman Perpustakaan Daerah Kabupaten Buleleng: 1. Peminjam wajib terdaftar sebagai anggota aktif. 2. Batas maksimal peminjaman adalah 3 buku dengan durasi 7 hari. 3. Keterlambatan pengembalian dikenakan denda Rp 1.000,- per hari per buku.',
+                'value' => 'Syarat & Ketentuan Peminjaman Perpustakaan Daerah Kabupaten Buleleng: 1. Peminjam wajib terdaftar sebagai anggota aktif. 2. Batas maksimal peminjaman adalah 3 buku dengan durasi 7 hari. 3. Layanan sirkulasi menerapkan kebijakan bebas denda uang untuk seluruh pemustaka.',
                 'group' => 'general',
                 'label' => 'Syarat & Ketentuan Peminjaman',
             ],

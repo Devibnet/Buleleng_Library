@@ -37,7 +37,8 @@ class ReportService
         $totalOverdue = $loans->filter(function ($loan) {
             return $loan->status === Loan::STATUS_OVERDUE || $loan->late_days > 0;
         })->count();
-        $totalFineAmount = (float) $loans->sum('fine_amount');
+        // Kebijakan Bebas Denda Uang
+        $totalFineAmount = 0;
 
         // Top 10 Buku Paling Sering Dipinjam
         $topBooks = DB::table('loans')
@@ -62,10 +63,10 @@ class ReportService
             ->limit(10)
             ->get();
 
-        // Rekapitulasi Denda & Pelanggaran
+        // Rekapitulasi Pelanggaran (Bebas Denda)
         $finesSummary = [
-            'total_fines_count' => $loans->where('fine_amount', '>', 0)->count(),
-            'total_fine_amount' => $totalFineAmount,
+            'total_fines_count' => 0,
+            'total_fine_amount' => 0,
             'total_late_days'   => (int) $loans->sum('late_days'),
         ];
 

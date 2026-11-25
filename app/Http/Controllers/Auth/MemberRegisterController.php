@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Models\LockedIdentityNumber;
 use App\Models\Member;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -61,13 +62,17 @@ class MemberRegisterController extends Controller
         $owner = $this->identityNumberOwner($kind, $number);
         // Pendaftar Google yang melengkapi datanya sendiri tidak dianggap duplikat
         $available = ! $owner || ($email !== '' && strtolower((string) $owner->email) === $email);
+        $locked = LockedIdentityNumber::isLocked($kind, $number);
 
         return response()->json([
             'success'   => true,
-            'available' => $available,
-            'message'   => $available
-                ? Member::IDENTITY_NUMBER_RULES[$kind]['label'] . ' dapat digunakan.'
-                : $this->numberTakenMessage($kind),
+            'available' => $available && ! $locked,
+            'locked'    => $locked,
+            'message'   => $locked
+                ? LockedIdentityNumber::lockedMessage($kind)
+                : ($available
+                    ? Member::IDENTITY_NUMBER_RULES[$kind]['label'] . ' dapat digunakan.'
+                    : $this->numberTakenMessage($kind)),
         ]);
     }
 
@@ -166,7 +171,9 @@ class MemberRegisterController extends Controller
         // Validasi seluruh inputan form wajib
         $validated = $request->validate([
             'nik'                 => ['required', 'digits:16', function ($attribute, $value, $fail) {
-                if ($this->identityNumberOwner('nik', (string) $value)) {
+                if (LockedIdentityNumber::isLocked('nik', (string) $value)) {
+                    $fail(LockedIdentityNumber::lockedMessage('nik'));
+                } elseif ($this->identityNumberOwner('nik', (string) $value)) {
                     $fail('NIK ini sudah terdaftar sebagai anggota perpustakaan.');
                 }
             }],
@@ -356,6 +363,8 @@ class MemberRegisterController extends Controller
         $nikRule = ['required', 'string', function ($attribute, $value, $fail) use ($numberKind, $existingMember) {
             if ($error = Member::identityNumberError($numberKind, (string) $value)) {
                 $fail($error);
+            } elseif (LockedIdentityNumber::isLocked($numberKind, (string) $value)) {
+                $fail(LockedIdentityNumber::lockedMessage($numberKind));
             } elseif ($this->identityNumberOwner($numberKind, (string) $value, $existingMember?->id)) {
                 $fail($this->numberTakenMessage($numberKind));
             }

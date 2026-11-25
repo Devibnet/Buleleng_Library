@@ -150,6 +150,8 @@ Route::prefix('v1')->group(function () {
         Route::put('/password', [ProfileController::class, 'updatePassword']);
         // Hapus akun sendiri beserta seluruh datanya (dibatasi 5 permintaan/menit)
         Route::delete('/', [ProfileController::class, 'destroy'])->middleware('throttle:5,1');
+        // Akun Google: masuk ulang dengan Google sebagai konfirmasi hapus akun
+        Route::post('/google-reauth', [\App\Http\Controllers\Auth\GoogleAuthController::class, 'deleteAccountRedirect'])->middleware('throttle:5,1');
         Route::get('/problem-history', [\App\Http\Controllers\Api\V1\Admin\ProblemCartController::class, 'myProblemHistory']);
     });
 
@@ -258,6 +260,10 @@ Route::prefix('v1')->group(function () {
             Route::post('/problem-carts/{id}/followup', [ProblemCartController::class, 'followup']);
             Route::post('/problem-carts/{id}/resolve', [ProblemCartController::class, 'resolve']);
             Route::delete('/problem-carts/{id}', [ProblemCartController::class, 'destroy']);
+
+            // Nomor identitas terkunci (akun bermasalah yang dihapus pemiliknya)
+            Route::get('/locked-identities', [\App\Http\Controllers\Api\V1\Admin\LockedIdentityController::class, 'index']);
+            Route::post('/locked-identities/{id}/unlock', [\App\Http\Controllers\Api\V1\Admin\LockedIdentityController::class, 'unlock'])->whereNumber('id')->middleware('throttle:30,1');
 
             // Kelola Akun Petugas & Log Audit
             // Batasan rinci (Admin hanya boleh membuat Operator & mengedit akunnya sendiri)

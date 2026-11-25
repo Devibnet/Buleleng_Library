@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\MemberResource;
+use App\Models\LockedIdentityNumber;
 use App\Models\Member;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -164,7 +165,9 @@ class MemberManagementController extends Controller
             'residential_address' => ['required', 'string'],
             'gender'              => ['required', 'string', 'in:L,P'],
             'nik'                 => ['required', 'digits:16', function ($attribute, $value, $fail) {
-                if (Member::withIdentityNumber('nik', (string) $value)->exists()) {
+                if (LockedIdentityNumber::isLocked('nik', (string) $value)) {
+                    $fail(LockedIdentityNumber::lockedMessageForStaff('nik'));
+                } elseif (Member::withIdentityNumber('nik', (string) $value)->exists()) {
                     $fail('NIK ini sudah terdaftar sebagai anggota perpustakaan.');
                 }
             }],
@@ -345,7 +348,9 @@ class MemberManagementController extends Controller
             'ktp_address'         => ['required', 'string'],
             'residential_address' => ['required', 'string'],
             'nik'                 => ['nullable', $numberFormat, function ($attribute, $value, $fail) use ($numberKind, $id) {
-                if (Member::withIdentityNumber($numberKind, (string) $value)->where('id', '!=', $id)->exists()) {
+                if (LockedIdentityNumber::isLocked($numberKind, (string) $value)) {
+                    $fail(LockedIdentityNumber::lockedMessageForStaff($numberKind));
+                } elseif (Member::withIdentityNumber($numberKind, (string) $value)->where('id', '!=', $id)->exists()) {
                     $fail(Member::IDENTITY_NUMBER_RULES[$numberKind]['label'] . ' ini sudah terdaftar sebagai anggota perpustakaan.');
                 }
             }],
@@ -655,6 +660,13 @@ class MemberManagementController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => $error,
+                ], 422);
+            }
+
+            if (LockedIdentityNumber::isLocked($kind, $nik)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => LockedIdentityNumber::lockedMessageForStaff($kind),
                 ], 422);
             }
 

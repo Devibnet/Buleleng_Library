@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Storage;
 
 class Catalog extends Model
 {
@@ -45,6 +46,20 @@ class Catalog extends Model
         'is_quarantine',
         'quarantine_reason',
     ];
+
+    /**
+     * cover_path sengaja tidak masuk $fillable: hanya diubah lewat endpoint sampul
+     * (BookCoverController), bukan lewat payload simpan katalog.
+     */
+    protected $appends = ['cover_url'];
+
+    /**
+     * URL publik sampul monograf, atau null bila belum ada sampul.
+     */
+    public function getCoverUrlAttribute(): ?string
+    {
+        return $this->cover_path ? Storage::disk('public')->url($this->cover_path) : null;
+    }
 
     /**
      * Get the attributes that should be cast.

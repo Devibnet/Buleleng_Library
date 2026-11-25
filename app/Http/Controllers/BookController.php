@@ -123,8 +123,13 @@ class BookController extends Controller
             $query->whereIn('material_type', $materials);
         }
 
-        if ($request->boolean('available')) {
+        // Ketersediaan: "available" = ada eksemplar di rak, "borrowed" = punya eksemplar tetapi semuanya sedang keluar.
+        // Parameter lama available=1 tetap didukung.
+        $availability = $request->query('availability') ?: ($request->boolean('available') ? 'available' : null);
+        if ($availability === 'available') {
             $query->where('available_copies', '>', 0);
+        } elseif ($availability === 'borrowed') {
+            $query->where('total_copies', '>', 0)->where('available_copies', '<=', 0);
         }
 
         // Pengurutan
@@ -148,9 +153,10 @@ class BookController extends Controller
                 $query->orderBy('id', 'desc');
         }
 
-        // Jumlah per halaman dari pilihan OPAC; nilai lain dikembalikan ke 15 supaya endpoint publik tidak bisa diminta ribuan baris
+        // OPAC mengirim jumlah per halaman sesuai kolom grid perangkat (mis. 20 atau 21).
+        // Dibatasi 6-60 supaya endpoint publik tidak bisa diminta ribuan baris.
         $perPage = (int) $request->input('per_page', 15);
-        if (! in_array($perPage, [15, 30, 50], true)) {
+        if ($perPage < 6 || $perPage > 60) {
             $perPage = 15;
         }
         $catalogs = $query->paginate($perPage);
@@ -201,6 +207,73 @@ class BookController extends Controller
             )
         ]
     )]
+    /**
+     * GET /api/books/popular?limit=4
+     * Koleksi yang paling sering dipinjam (sepanjang waktu), untuk Beranda.
+     * Yang dihitung hanya peminjaman yang bukunya benar-benar diserahkan ke anggota;
+     * reservasi yang batal, kedaluwarsa, atau tidak tersedia tidak dihitung.
+     */
+    /**
+     * GET /api/books/facets
+     * Jumlah judul per jenis bahan (hanya katalog yang tampil di OPAC), untuk filter OPAC.
+     */
+    public function facets(): JsonResponse
+    {
+        $materials = Catalog::where('is_quarantine', false)
+            ->whereNotNull('material_type')
+            ->where('material_type', '!=', '')
+            ->selectRaw('material_type, COUNT(*) as total')
+            ->groupBy('material_type')
+            ->orderByDesc('total')
+            ->get()
+            ->map(fn ($row) => ['value' => $row->material_type, 'count' => (int) $row->total])
+            ->values();
+
+        return response()->json([
+            'success' => true,
+            'data'    => ['material_types' => $materials],
+        ]);
+    }
+
+    public function popular(Request $request): JsonResponse
+    {
+        $limit = min(max((int) $request->input('limit', 4), 1), 12);
+
+        $counts = Loan::query()
+            ->join('collections', 'loans.collection_id', '=', 'collections.id')
+            ->join('catalogs', 'collections.catalog_id', '=', 'catalogs.id')
+            ->where('catalogs.is_quarantine', false)
+            ->whereIn('loans.status', [
+                Loan::STATUS_BORROWED,
+                Loan::STATUS_RETURNED,
+                Loan::STATUS_OVERDUE,
+                Loan::STATUS_LOST,
+            ])
+            ->groupBy('collections.catalog_id')
+            ->selectRaw('collections.catalog_id as catalog_id, COUNT(loans.id) as total')
+            ->orderByDesc('total')
+            ->orderByDesc('collections.catalog_id')
+            ->limit($limit)
+            ->pluck('total', 'catalog_id');
+
+        $catalogs = Catalog::with('collections')->whereIn('id', $counts->keys())->get()->keyBy('id');
+
+        // Urutan mengikuti jumlah peminjaman, bukan urutan id dari database
+        $data = $counts->keys()
+            ->filter(fn ($id) => $catalogs->has($id))
+            ->map(fn ($id) => array_merge(
+                (new CatalogResource($catalogs[$id]))->toArray($request),
+                ['borrow_count' => (int) $counts[$id]]
+            ))
+            ->values();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Koleksi paling sering dipinjam berhasil diambil.',
+            'data'    => $data,
+        ], 200);
+    }
+
     public function stats(): JsonResponse
     {
         $today = now()->toDateString();

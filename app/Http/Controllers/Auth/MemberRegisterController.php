@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Auth;
 
+use App\Services\WebpImageStorage;
 use App\Http\Controllers\Controller;
 use App\Models\LockedIdentityNumber;
 use App\Models\Member;
@@ -219,12 +220,7 @@ class MemberRegisterController extends Controller
         if ($request->hasFile('photo')) {
             $file = $request->file('photo');
             if ($file && $file->isValid()) {
-                $filename = $file->hashName();
-                \Illuminate\Support\Facades\Storage::disk('public')->put(
-                    'photos/members/' . $filename, 
-                    file_get_contents($file->getPathname())
-                );
-                $photoPath = '/storage/photos/members/' . $filename;
+                $photoPath = '/storage/' . WebpImageStorage::storeUploaded($file, 'photos/members', 'reg');
             }
         }
 
@@ -454,12 +450,7 @@ class MemberRegisterController extends Controller
         // Handle File Upload Pas Foto
         $photoPath = null;
         if ($photoFile && $photoFile->isValid()) {
-            $filename = $photoFile->hashName();
-            \Illuminate\Support\Facades\Storage::disk('public')->put(
-                'photos/members/' . $filename,
-                file_get_contents($photoFile->getPathname())
-            );
-            $photoPath = '/storage/photos/members/' . $filename;
+            $photoPath = '/storage/' . WebpImageStorage::storeUploaded($photoFile, 'photos/members', 'reg');
         }
 
         if ($existingMember) {

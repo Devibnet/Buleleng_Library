@@ -2,6 +2,7 @@
 
 namespace App\Imports;
 
+use App\Support\AuthorName;
 use App\Models\Catalog;
 use App\Models\Collection;
 use Carbon\Carbon;
@@ -676,7 +677,7 @@ class BooksStockOpnameImport
         // Format DAPD: TAJUK PENGARANG (1) = pengarang utama, (2) = badan korporasi,
         // PENGARANG (1)/(2) = pengarang tambahan. Format lama: "pengarang" = pengarang utama.
         $hasHeading = (bool) ($data['_has_heading'] ?? false);
-        $authorMain = $hasHeading ? $this->text($data, 'author_heading', 0) : $this->text($data, 'author', 0);
+        $authorMain = AuthorName::clean($hasHeading ? $this->text($data, 'author_heading', 0) : $this->text($data, 'author', 0));
 
         $language = $this->text($data, 'language');
 
@@ -687,9 +688,9 @@ class BooksStockOpnameImport
             'subtitle'                     => $this->cleanIsbd($this->text($data, 'subtitle')),
             'statement_of_responsibility'  => $this->cleanIsbd($this->text($data, 'statement_of_responsibility')),
             'author_main'                  => $authorMain,
-            'author_corporate'             => $this->text($data, 'author_corporate') ?? ($hasHeading ? $this->text($data, 'author_heading', 1) : null),
-            'author_additional_person'     => $this->text($data, 'author_added_person') ?? ($hasHeading ? $this->text($data, 'author', 0) : null),
-            'author_additional_corporate'  => $this->text($data, 'author_added_corporate') ?? ($hasHeading ? $this->text($data, 'author', 1) : null),
+            'author_corporate'             => AuthorName::clean($this->text($data, 'author_corporate') ?? ($hasHeading ? $this->text($data, 'author_heading', 1) : null)),
+            'author_additional_person'     => AuthorName::clean($this->text($data, 'author_added_person') ?? ($hasHeading ? $this->text($data, 'author', 0) : null)),
+            'author_additional_corporate'  => AuthorName::clean($this->text($data, 'author_added_corporate') ?? ($hasHeading ? $this->text($data, 'author', 1) : null)),
             'edition'                      => $this->cleanIsbd($this->text($data, 'edition')),
             'publish_city'                 => $this->cleanIsbd($this->text($data, 'publish_city')),
             'publisher'                    => $publisher,

@@ -446,9 +446,15 @@ class BookManagementController extends Controller
 
         DB::beginTransaction();
         try {
+            $coverPath = $catalog->cover_path;
             $catalog->collections()->delete();
             $catalog->delete();
             DB::commit();
+
+            // Sampul ikut dihapus setelah data katalog benar-benar terhapus
+            if ($coverPath) {
+                \Illuminate\Support\Facades\Storage::disk('public')->delete($coverPath);
+            }
 
             $admin = $request->user();
             if ($admin instanceof Admin) {

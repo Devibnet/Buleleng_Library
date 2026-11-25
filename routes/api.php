@@ -37,6 +37,8 @@ use Illuminate\Support\Facades\Route;
 // Public Catalog Endpoints (Bisa diakses tanpa login di root /books)
 Route::get('/opac/stats', [BookController::class, 'stats']);
 Route::get('/books', [BookController::class, 'index']);
+Route::get('/books/popular', [BookController::class, 'popular']);
+Route::get('/books/facets', [BookController::class, 'facets']);
 Route::get('/books/{id}', [BookController::class, 'show']);
 Route::post('/books/{id}/reserve', [ReservationController::class, 'reserve']);
 
@@ -100,6 +102,8 @@ Route::prefix('v1')->group(function () {
     // 1. Public Catalog Endpoints (v1)
     Route::get('/opac/stats', [BookController::class, 'stats']);
     Route::get('/books', [BookController::class, 'index']);
+    Route::get('/books/popular', [BookController::class, 'popular']);
+    Route::get('/books/facets', [BookController::class, 'facets']);
     Route::get('/books/{id}', [BookController::class, 'show']);
 
     // 2. Public Guestbook Endpoints (v1)
@@ -231,6 +235,8 @@ Route::prefix('v1')->group(function () {
             Route::post('/books', [BookManagementController::class, 'store']);
             Route::put('/books/{id}', [BookManagementController::class, 'updateCatalog']);
             Route::delete('/books/{id}', [BookManagementController::class, 'destroyCatalog']);
+            Route::post('/books/{id}/cover', [\App\Http\Controllers\Api\V1\Admin\BookCoverController::class, 'store'])->whereNumber('id');
+            Route::delete('/books/{id}/cover', [\App\Http\Controllers\Api\V1\Admin\BookCoverController::class, 'destroy'])->whereNumber('id');
             Route::put('/collections/{collection_id}', [BookManagementController::class, 'updateCollection']);
             Route::delete('/collections/{collection_id}', [BookManagementController::class, 'destroyCollection']);
             Route::post('/books/import', [BookManagementController::class, 'importExcel']);
@@ -250,8 +256,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/members/export', [MemberManagementController::class, 'export']);
             Route::post('/members', [MemberManagementController::class, 'store']);
             Route::put('/members/{id}', [MemberManagementController::class, 'update']);
-            Route::delete('/members/{id}', [MemberManagementController::class, 'destroy']);
-            Route::post('/members/bulk-delete', [MemberManagementController::class, 'bulkDestroy']);
+            Route::post('/members/bulk-extend', [MemberManagementController::class, 'bulkExtend']);
             Route::post('/members/{id}/approve-ktp', [MemberManagementController::class, 'approveKtp'])->whereNumber('id');
             Route::post('/members/{id}/reject-ktp', [MemberManagementController::class, 'rejectKtp'])->whereNumber('id');
             Route::post('/members/{id}/check-identity', [MemberManagementController::class, 'checkIdentity'])->whereNumber('id')->middleware('throttle:30,1');

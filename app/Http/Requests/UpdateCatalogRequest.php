@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Support\AuthorName;
 use Illuminate\Foundation\Http\FormRequest;
 
 class UpdateCatalogRequest extends FormRequest
@@ -19,6 +20,14 @@ class UpdateCatalogRequest extends FormRequest
      *
      * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
      */
+    /**
+     * Buang koma/titik koma sisa di awal dan akhir nama pengarang sebelum divalidasi.
+     */
+    protected function prepareForValidation(): void
+    {
+        $this->merge(AuthorName::cleanFields($this->all()));
+    }
+
     public function rules(): array
     {
         return [

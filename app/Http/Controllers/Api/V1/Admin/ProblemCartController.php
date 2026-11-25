@@ -4,10 +4,12 @@ namespace App\Http\Controllers\Api\V1\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\MemberCartResource;
+use App\Models\Admin;
 use App\Models\Collection;
 use App\Models\Loan;
 use App\Models\Member;
 use App\Models\MemberCart;
+use App\Services\AdminActivityLogger;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -259,6 +261,25 @@ class ProblemCartController extends Controller
 
         $cart->load(['member', 'loan', 'collection.catalog']);
 
+        $admin = $request->user();
+        if ($admin instanceof Admin) {
+            app(AdminActivityLogger::class)->log(
+                $request,
+                $admin,
+                'problem_cart_created',
+                $cart->member ?? $member,
+                [
+                    'problem_type'  => ['from' => null, 'to' => $cart->problem_type],
+                    'item_title'    => ['from' => null, 'to' => $cart->item_title ?: 'Koleksi Buku'],
+                    'item_barcode'  => ['from' => null, 'to' => $cart->item_barcode ?: '-'],
+                    'action_status' => ['from' => null, 'to' => $cart->action_status],
+                ],
+                null,
+                null,
+                'Keranjang Bermasalah'
+            );
+        }
+
         return response()->json([
             'success' => true,
             'message' => "Kasus permasalahan anggota {$cart->member?->name} berhasil dicatat.",
@@ -338,8 +359,26 @@ class ProblemCartController extends Controller
             $data['followup_history'] = $history;
         }
 
+        $originalStatus = $cart->getOriginal('action_status');
         $cart->update($data);
         $cart->load(['member', 'loan', 'collection.catalog']);
+
+        $admin = $request->user();
+        if ($admin instanceof Admin) {
+            app(AdminActivityLogger::class)->log(
+                $request,
+                $admin,
+                'problem_cart_updated',
+                $cart->member,
+                [
+                    'action_status' => ['from' => $originalStatus, 'to' => $cart->action_status],
+                    'action_notes'  => ['from' => null, 'to' => $cart->action_notes],
+                ],
+                null,
+                null,
+                'Keranjang Bermasalah'
+            );
+        }
 
         return response()->json([
             'success' => true,
@@ -419,6 +458,23 @@ class ProblemCartController extends Controller
         $cart->update($updateData);
         $cart->load(['member', 'loan', 'collection.catalog']);
 
+        $admin = $request->user();
+        if ($admin instanceof Admin) {
+            app(AdminActivityLogger::class)->log(
+                $request,
+                $admin,
+                'problem_cart_followup',
+                $cart->member,
+                [
+                    'action'        => ['from' => null, 'to' => $validated['action']],
+                    'action_status' => ['from' => null, 'to' => $validated['action_status'] ?? $cart->action_status],
+                ],
+                "Pencatatan tindak lanjut '{$validated['action']}' pada kasus anggota {$cart->member?->name}.",
+                null,
+                'Keranjang Bermasalah'
+            );
+        }
+
         return response()->json([
             'success' => true,
             'message' => "Tindak lanjut '{$validated['action']}' berhasil dicatat.",
@@ -474,6 +530,23 @@ class ProblemCartController extends Controller
         }
 
         $cart->load(['member', 'loan', 'collection.catalog']);
+
+        $admin = $request->user();
+        if ($admin instanceof Admin) {
+            app(AdminActivityLogger::class)->log(
+                $request,
+                $admin,
+                'problem_cart_resolved',
+                $cart->member,
+                [
+                    'status' => ['from' => 'Kasus Aktif', 'to' => 'SELESAI'],
+                    'notes'  => ['from' => null, 'to' => $resolutionNotes],
+                ],
+                null,
+                null,
+                'Keranjang Bermasalah'
+            );
+        }
 
         return response()->json([
             'success' => true,
@@ -549,6 +622,23 @@ class ProblemCartController extends Controller
             ], 422);
         }
 
+        $admin = $request->user();
+        if ($admin instanceof Admin) {
+            app(AdminActivityLogger::class)->log(
+                $request,
+                $admin,
+                'problem_cart_bulk_action',
+                null,
+                [
+                    'action'         => ['from' => null, 'to' => $action],
+                    'affected_count' => ['from' => null, 'to' => $count],
+                ],
+                "Menjalankan tindakan massal '{$action}' pada {$count} kasus di Keranjang Bermasalah.",
+                null,
+                'Keranjang Bermasalah'
+            );
+        }
+
         return response()->json([
             'success' => true,
             'message' => $msg,
@@ -559,9 +649,9 @@ class ProblemCartController extends Controller
     /**
      * Delete a single problem case.
      */
-    public function destroy(int $id): JsonResponse
+    public function destroy(Request $request, int $id): JsonResponse
     {
-        $cart = MemberCart::find($id);
+        $cart = MemberCart::with('member')->find($id);
 
         if (!$cart) {
             return response()->json([
@@ -570,7 +660,9 @@ class ProblemCartController extends Controller
             ], 404);
         }
 
+        $member = $cart->member;
         $memberId = $cart->member_id;
+        $cartTitle = $cart->item_title ?: 'Koleksi Perpustakaan';
         $cart->delete();
 
         // Pulihkan status member jika tidak ada kasus aktif tersisa
@@ -580,6 +672,22 @@ class ProblemCartController extends Controller
             if ($member && str_contains(strtolower($member->status), 'dibekukan')) {
                 $member->update(['status' => 'Aktif Bebas Pustaka']);
             }
+        }
+
+        $admin = $request->user();
+        if ($admin instanceof Admin) {
+            app(AdminActivityLogger::class)->log(
+                $request,
+                $admin,
+                'problem_cart_deleted',
+                $member,
+                [
+                    'item_title' => ['from' => $cartTitle, 'to' => null],
+                ],
+                null,
+                null,
+                'Keranjang Bermasalah'
+            );
         }
 
         return response()->json([

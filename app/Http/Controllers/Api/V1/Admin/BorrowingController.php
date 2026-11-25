@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Api\V1\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\LoanResource;
+use App\Models\Admin;
 use App\Models\Collection;
 use App\Models\Loan;
 use App\Models\Member;
+use App\Services\AdminActivityLogger;
 use App\Services\CirculationService;
 use Exception;
 use Illuminate\Http\JsonResponse;
@@ -193,6 +195,24 @@ class BorrowingController extends Controller
         }
 
         $loans->each->load(['member', 'collection.catalog', 'createdByAdmin']);
+
+        $admin = $request->user();
+        if ($admin instanceof Admin) {
+            app(AdminActivityLogger::class)->log(
+                $request,
+                $admin,
+                'loan_borrowed',
+                $member,
+                [
+                    'loan_count' => ['from' => null, 'to' => $loans->count()],
+                    'barcodes'   => ['from' => null, 'to' => implode(', ', $validated['barcodes'])],
+                    'duration'   => ['from' => null, 'to' => "{$validated['duration_days']} hari"],
+                ],
+                "Peminjaman {$loans->count()} buku untuk anggota {$member->name} ({$member->member_no}) di loket sirkulasi.",
+                null,
+                'Layanan Sirkulasi'
+            );
+        }
 
         return response()->json([
             'success' => true,

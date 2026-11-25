@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Mail\LoanDueDateNotificationMail;
+use App\Mail\ReservationReadyForPickupMail;
 use App\Models\Catalog;
 use App\Models\Collection;
 use App\Models\Loan;
@@ -9,6 +11,8 @@ use App\Models\Member;
 use Carbon\Carbon;
 use Exception;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 
 class CirculationService
 {
@@ -28,6 +32,44 @@ class CirculationService
         }
 
         return $date->endOfDay();
+    }
+
+    /**
+     * Kirim email pemberitahuan buku reservasi siap diambil di loket sirkulasi
+     */
+    public function sendReservationReadyEmail(Loan $loan): void
+    {
+        $loan->loadMissing(['member', 'collection.catalog']);
+        $email = $loan->member?->email;
+
+        if (empty($email)) {
+            return;
+        }
+
+        try {
+            Mail::to($email)->send(new ReservationReadyForPickupMail($loan));
+        } catch (\Throwable $e) {
+            Log::warning("Gagal mengirim email reservasi siap diambil ke {$email}: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Kirim email informasi peminjaman & tenggat pengembalian buku (due date)
+     */
+    public function sendLoanDueDateEmail(Loan $loan, string $type = LoanDueDateNotificationMail::TYPE_NEW_LOAN): void
+    {
+        $loan->loadMissing(['member', 'collection.catalog']);
+        $email = $loan->member?->email;
+
+        if (empty($email)) {
+            return;
+        }
+
+        try {
+            Mail::to($email)->send(new LoanDueDateNotificationMail($loan, $type));
+        } catch (\Throwable $e) {
+            Log::warning("Gagal mengirim email tenggat pinjam ({$type}) ke {$email}: " . $e->getMessage());
+        }
     }
 
     /**
@@ -117,7 +159,7 @@ class CirculationService
      */
     public function confirmReady($loanId, ?int $operatorAdminId = null): Loan
     {
-        return DB::transaction(function () use ($loanId, $operatorAdminId) {
+        $loan = DB::transaction(function () use ($loanId, $operatorAdminId) {
             $loan = Loan::where(fn ($q) => $q->where('id', $loanId)->orWhere('reservation_code', $loanId))
                 ->where('status', Loan::STATUS_PENDING_CHECK)
                 ->lockForUpdate()
@@ -141,6 +183,10 @@ class CirculationService
 
             return $loan;
         });
+
+        $this->sendReservationReadyEmail($loan);
+
+        return $loan;
     }
 
     /**
@@ -184,7 +230,7 @@ class CirculationService
      */
     public function processDirectBorrow(string $memberNo, string $bookBarcode, ?int $operatorAdminId = null, int $durationDays = 7): Loan
     {
-        return DB::transaction(function () use ($memberNo, $bookBarcode, $operatorAdminId, $durationDays) {
+        $loan = DB::transaction(function () use ($memberNo, $bookBarcode, $operatorAdminId, $durationDays) {
             $member = Member::where('member_no', $memberNo)
                 ->orWhere('id', $memberNo)
                 ->lockForUpdate()
@@ -256,6 +302,10 @@ class CirculationService
 
             return $loan;
         });
+
+        $this->sendLoanDueDateEmail($loan, LoanDueDateNotificationMail::TYPE_NEW_LOAN);
+
+        return $loan;
     }
 
     /**
@@ -266,7 +316,7 @@ class CirculationService
      */
     public function confirmPickup(string $reservationCode, ?int $operatorAdminId = null, int $durationDays = 7): Loan
     {
-        return DB::transaction(function () use ($reservationCode, $operatorAdminId, $durationDays) {
+        $loan = DB::transaction(function () use ($reservationCode, $operatorAdminId, $durationDays) {
             $loan = Loan::where('reservation_code', $reservationCode)
                 ->whereIn('status', [Loan::STATUS_READY_FOR_PICKUP, Loan::STATUS_RESERVED, Loan::STATUS_PENDING_CHECK])
                 ->lockForUpdate()
@@ -302,6 +352,10 @@ class CirculationService
 
             return $loan;
         });
+
+        $this->sendLoanDueDateEmail($loan, LoanDueDateNotificationMail::TYPE_NEW_LOAN);
+
+        return $loan;
     }
 
     /**
@@ -403,7 +457,7 @@ class CirculationService
      */
     public function processRenewal(string $bookBarcode, int $extensionDays = 7): Loan
     {
-        return DB::transaction(function () use ($bookBarcode, $extensionDays) {
+        $loan = DB::transaction(function () use ($bookBarcode, $extensionDays) {
             $collection = Collection::where('barcode_no', $bookBarcode)->first();
 
             if (! $collection) {
@@ -442,6 +496,10 @@ class CirculationService
 
             return $loan;
         });
+
+        $this->sendLoanDueDateEmail($loan, LoanDueDateNotificationMail::TYPE_RENEWAL);
+
+        return $loan;
     }
 
     /**

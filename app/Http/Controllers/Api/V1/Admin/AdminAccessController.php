@@ -6,13 +6,16 @@ use App\Http\Controllers\Controller;
 use App\Models\Admin;
 use App\Models\AdminActivityLog;
 use App\Models\AdminPasswordReset;
+use App\Models\ImpersonationSession;
 use App\Services\AdminActivityLogger;
 use App\Support\StaffPassword;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class AdminAccessController extends Controller
 {
@@ -695,13 +698,37 @@ class AdminAccessController extends Controller
     protected function formatLog(AdminActivityLog $log): array
     {
         $fieldLabels = [
-            'name'      => 'Nama',
-            'username'  => 'Username',
-            'email'     => 'Email',
-            'role'      => 'Peran',
-            'is_active' => 'Status Akun',
-            'password'  => 'Password',
-            'reset_link' => 'Link Reset',
+            'name'          => 'Nama',
+            'username'      => 'Username',
+            'email'         => 'Email',
+            'role'          => 'Peran',
+            'is_active'     => 'Status Akun',
+            'password'      => 'Password',
+            'reset_link'    => 'Link Reset',
+            'problem_type'  => 'Jenis Permasalahan',
+            'item_title'    => 'Judul Buku',
+            'item_barcode'  => 'Barcode Buku',
+            'action_status' => 'Status Tindakan',
+            'action_notes'  => 'Catatan Tindakan',
+            'action'        => 'Tindakan',
+            'notes'         => 'Catatan',
+            'status'        => 'Status',
+            'affected_count'=> 'Jumlah Terdampak',
+            'title'         => 'Judul',
+            'author_main'   => 'Pengarang Utama',
+            'publisher'     => 'Penerbit',
+            'isbn'          => 'ISBN',
+            'barcode_no'    => 'Nomor Barcode',
+            'call_number'   => 'Nomor Panggil',
+            'shelf_location'=> 'Lokasi Rak',
+            'loan_count'    => 'Jumlah Pinjaman',
+            'returned_count'=> 'Jumlah Kembali',
+            'barcodes'      => 'Daftar Barcode',
+            'duration'      => 'Durasi Pinjam',
+            'locker_number' => 'Nomor Loker',
+            'phone_number'  => 'Nomor Telepon',
+            'job_category'  => 'Kategori Pekerjaan',
+            'institution_name' => 'Nama Instansi',
         ];
 
         $formatValue = function (string $field, $value) {
@@ -718,14 +745,21 @@ class AdminAccessController extends Controller
         // Urutkan sesuai urutan form (kolom JSON MySQL tidak menjaga urutan key)
         $order = array_flip(array_keys($fieldLabels));
         $rawChanges = $log->changes ?? [];
+        $durationSeconds = isset($rawChanges['duration_seconds']) ? (int) $rawChanges['duration_seconds'] : null;
+
         uksort($rawChanges, fn ($a, $b) => ($order[$a] ?? 99) <=> ($order[$b] ?? 99));
 
         $changes = [];
         foreach ($rawChanges as $field => $change) {
+            // Hanya masukkan ke tabel perubahan jika field memiliki struktur diff: 'from' atau 'to'
+            if (! is_array($change) || (! array_key_exists('from', $change) && ! array_key_exists('to', $change))) {
+                continue;
+            }
+
             $isPassword = $field === 'password';
             $changes[] = [
                 'field'       => $field,
-                'label'       => $fieldLabels[$field] ?? ucfirst($field),
+                'label'       => $fieldLabels[$field] ?? ucfirst(str_replace('_', ' ', $field)),
                 'from'        => $isPassword ? null : $formatValue($field, $change['from'] ?? null),
                 'to'          => $isPassword ? 'Diubah (disembunyikan)' : $formatValue($field, $change['to'] ?? null),
                 'is_password' => $isPassword,
@@ -736,17 +770,28 @@ class AdminAccessController extends Controller
         }
 
         return [
-            'id'           => $log->id,
-            'action'       => $log->action,
-            'action_label' => AdminActivityLog::ACTION_LABELS[$log->action] ?? $log->action,
-            'description'  => $log->description,
-            'actor'        => [
+            'id'               => $log->id,
+            'action'           => $log->action,
+            'action_label'     => AdminActivityLog::ACTION_LABELS[$log->action] ?? $log->action,
+            'module'           => $log->module ?? 'Manajemen Petugas & Akses',
+            'result'           => $log->result ?? 'success',
+            'description'      => $log->description,
+            'duration_seconds' => $durationSeconds,
+            'actor'            => [
                 'id'         => $log->actor_id,
                 'name'       => $log->actor_name ?? 'Sistem',
                 'username'   => $log->actor_username,
                 'role'       => $log->actor_role,
                 'role_label' => AdminActivityLogger::roleLabel($log->actor_role),
             ],
+            'impersonator' => $log->impersonator_id ? [
+                'id'         => $log->impersonator_id,
+                'name'       => $log->impersonator_name,
+                'role'       => 'super_admin',
+                'role_label' => 'Super Admin',
+            ] : null,
+            'impersonated_session_id' => $log->impersonated_session_id,
+            'impersonation_reason'    => $log->impersonation_reason,
             'target'       => [
                 'id'         => $log->target_id,
                 'name'       => $log->target_name,
@@ -762,5 +807,239 @@ class AdminAccessController extends Controller
             'created_at_formatted'=> $log->created_at?->copy()->timezone('Asia/Makassar')->locale('id')->translatedFormat('d M Y, H:i:s') . ' WITA',
             'created_at_human'    => $log->created_at?->copy()->locale('id')->diffForHumans(),
         ];
+    }
+
+    /**
+     * POST /api/v1/admin/access/users/{id}/impersonate
+     * Memulai sesi impersonasi akun Admin atau Operator oleh Super Admin.
+     */
+    public function impersonate(Request $request, int $id): JsonResponse
+    {
+        if ($deny = $this->authorizeSuperAdmin($request)) {
+            return $deny;
+        }
+
+        $superAdmin = $this->getAuthenticatedAdmin($request);
+
+        // Validasi: tidak boleh nested impersonation
+        if (AdminActivityLogger::resolveActiveImpersonation($request)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Tidak dapat melakukan impersonasi bertingkat. Akhiri sesi impersonasi saat ini terlebih dahulu.',
+            ], 400);
+        }
+
+        $request->validate([
+            'reason' => 'required|string|min:5|max:500',
+        ], [
+            'reason.required' => 'Alasan impersonasi wajib diisi.',
+            'reason.min'      => 'Alasan impersonasi minimal 5 karakter.',
+            'reason.max'      => 'Alasan impersonasi maksimal 500 karakter.',
+        ]);
+
+        $target = Admin::find($id);
+
+        if (! $target) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Akun target petugas tidak ditemukan.',
+            ], 404);
+        }
+
+        // Validasi: tidak boleh impersonate akun sendiri
+        if ($target->id === $superAdmin->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Tidak dapat melakukan impersonasi terhadap akun Anda sendiri.',
+            ], 422);
+        }
+
+        // Validasi: tidak boleh impersonate sesama Super Admin
+        if ($target->role === 'super_admin') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Super Admin tidak diperkenankan mengimpersonasi sesama akun Super Admin.',
+            ], 422);
+        }
+
+        // Validasi: akun target harus aktif
+        if (! $target->is_active) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Akun target saat ini berstatus nonaktif dan tidak dapat diimpersonasi.',
+            ], 422);
+        }
+
+        $sessionId = ImpersonationSession::generateSessionId();
+        $expiresAt = now()->addHours(2); // Batas waktu sesi impersonasi: 2 jam
+
+        // Buat token Sanctum untuk akun target dengan nama khusus sesi impersonasi
+        $tokenResult = $target->createToken("impersonation:{$superAdmin->id}:{$sessionId}", ['*'], $expiresAt);
+        $plainToken = $tokenResult->plainTextToken;
+        $tokenId = $tokenResult->accessToken->id;
+
+        // Catat sesi impersonasi di database
+        $session = ImpersonationSession::create([
+            'session_id'           => $sessionId,
+            'super_admin_id'       => $superAdmin->id,
+            'super_admin_name'     => $superAdmin->name,
+            'super_admin_username' => $superAdmin->username,
+            'target_admin_id'      => $target->id,
+            'target_name'          => $target->name,
+            'target_username'      => $target->username,
+            'target_role'          => $target->role,
+            'reason'               => trim((string) $request->input('reason')),
+            'token_id'             => $tokenId,
+            'ip_address'           => $request->ip(),
+            'user_agent'           => Str::limit((string) $request->userAgent(), 250, ''),
+            'status'               => ImpersonationSession::STATUS_ACTIVE,
+            'started_at'           => now(),
+            'expires_at'           => $expiresAt,
+        ]);
+
+        // Catat ke Audit Log
+        $this->activityLogger->log(
+            $request,
+            $superAdmin,
+            'impersonate_start',
+            $target,
+            [
+                'session_id' => $sessionId,
+                'reason'     => $request->input('reason'),
+                'expires_at' => $expiresAt->toIso8601String(),
+            ],
+            null,
+            null,
+            'Manajemen Petugas & Akses'
+        );
+
+        $roleLabel = AdminActivityLogger::roleLabel($target->role);
+
+        return response()->json([
+            'success' => true,
+            'message' => "Sesi impersonasi berhasil dimulai sebagai {$roleLabel} – {$target->name}.",
+            'data'    => [
+                'token'         => $plainToken,
+                'user'          => $this->formatAdmin($target),
+                'impersonation' => [
+                    'session_id'   => $sessionId,
+                    'super_admin'  => [
+                        'id'       => $superAdmin->id,
+                        'name'     => $superAdmin->name,
+                        'username' => $superAdmin->username,
+                        'role'     => $superAdmin->role,
+                    ],
+                    'target'       => [
+                        'id'         => $target->id,
+                        'name'       => $target->name,
+                        'username'   => $target->username,
+                        'role'       => $target->role,
+                        'role_label' => $roleLabel,
+                    ],
+                    'reason'       => $request->input('reason'),
+                    'started_at'   => $session->started_at->toIso8601String(),
+                    'expires_at'   => $session->expires_at->toIso8601String(),
+                ],
+            ],
+        ], 200);
+    }
+
+    /**
+     * POST /api/v1/admin/access/stop-impersonation
+     * Mengakhiri sesi impersonasi dan mencatat ke audit log.
+     */
+    public function stopImpersonation(Request $request): JsonResponse
+    {
+        $session = null;
+        $sessionId = $request->input('session_id');
+
+        if ($sessionId) {
+            $session = ImpersonationSession::where('session_id', $sessionId)->active()->first();
+        }
+
+        if (! $session) {
+            $session = AdminActivityLogger::resolveActiveImpersonation($request);
+        }
+
+        if (! $session) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Tidak ditemukan sesi impersonasi aktif yang dapat diakhiri.',
+            ], 404);
+        }
+
+        $session->update([
+            'status'     => ImpersonationSession::STATUS_ENDED,
+            'ended_at'   => now(),
+            'end_reason' => $request->input('end_reason', 'manual'),
+        ]);
+
+        // Hapus token akses sesi impersonasi
+        if ($session->token_id) {
+            PersonalAccessToken::where('id', $session->token_id)->delete();
+        }
+
+        $superAdmin = Admin::find($session->super_admin_id);
+        $targetAdmin = Admin::find($session->target_admin_id);
+
+        $this->activityLogger->log(
+            $request,
+            $superAdmin,
+            'impersonate_stop',
+            $targetAdmin,
+            [
+                'session_id'       => $session->session_id,
+                'reason'           => $session->reason,
+                'duration_seconds' => $session->started_at ? now()->diffInSeconds($session->started_at) : 0,
+            ],
+            null,
+            null,
+            'Manajemen Petugas & Akses'
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Sesi impersonasi telah diakhiri. Konteks dikembalikan ke akun Super Admin.',
+        ], 200);
+    }
+
+    /**
+     * GET /api/v1/admin/access/impersonation/current
+     * Cek status sesi impersonasi token saat ini.
+     */
+    public function currentImpersonation(Request $request): JsonResponse
+    {
+        $session = AdminActivityLogger::resolveActiveImpersonation($request);
+
+        if (! $session) {
+            return response()->json([
+                'success'          => true,
+                'is_impersonating' => false,
+                'data'             => null,
+            ]);
+        }
+
+        return response()->json([
+            'success'          => true,
+            'is_impersonating' => true,
+            'data'             => [
+                'session_id'   => $session->session_id,
+                'super_admin'  => [
+                    'id'       => $session->super_admin_id,
+                    'name'     => $session->super_admin_name,
+                    'username' => $session->super_admin_username,
+                ],
+                'target'       => [
+                    'id'         => $session->target_admin_id,
+                    'name'       => $session->target_name,
+                    'username'   => $session->target_username,
+                    'role'       => $session->target_role,
+                    'role_label' => AdminActivityLogger::roleLabel($session->target_role),
+                ],
+                'reason'       => $session->reason,
+                'started_at'   => $session->started_at?->toIso8601String(),
+                'expires_at'   => $session->expires_at?->toIso8601String(),
+            ],
+        ]);
     }
 }

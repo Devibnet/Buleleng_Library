@@ -38,6 +38,7 @@ class Loan extends Model
         'extension_count',
         'status',
         'fine_amount',
+        'due_reminder_sent_at',
         'created_by_user_id',
         'returned_by_user_id',
     ];
@@ -56,8 +57,9 @@ class Loan extends Model
             'due_date'        => 'date',
             'return_date'     => 'date',
             'late_days'       => 'integer',
-            'extension_count' => 'integer',
-            'fine_amount'     => 'decimal:2',
+            'extension_count'      => 'integer',
+            'fine_amount'          => 'decimal:2',
+            'due_reminder_sent_at' => 'datetime',
         ];
     }
 

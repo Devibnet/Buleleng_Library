@@ -51,6 +51,8 @@ Route::post('/auth/member/register', [MemberRegisterController::class, 'register
 Route::post('/member/register', [MemberRegisterController::class, 'registerApi']);
 Route::post('/auth/member/check-nik', [MemberRegisterController::class, 'checkNik'])->middleware('throttle:15,1');
 Route::post('/auth/member/force-change-password', [AuthController::class, 'forceChangePassword'])->middleware('auth:sanctum');
+Route::post('/auth/member/verify-activation-token', [AuthController::class, 'verifyActivationToken']);
+Route::post('/auth/member/complete-activation', [AuthController::class, 'completeActivation']);
 
 // Public Guestbook Endpoints (Bisa diakses tanpa login di root /api/guestbooks)
 Route::prefix('guestbooks')->group(function () {
@@ -128,6 +130,8 @@ Route::prefix('v1')->group(function () {
     // Cek NIK ganda secara langsung dari form pendaftaran (dibatasi 15 permintaan/menit per IP)
     Route::post('/auth/member/check-nik', [MemberRegisterController::class, 'checkNik'])->middleware('throttle:15,1');
     Route::post('/auth/member/force-change-password', [AuthController::class, 'forceChangePassword'])->middleware('auth:sanctum');
+    Route::post('/auth/member/verify-activation-token', [AuthController::class, 'verifyActivationToken']);
+    Route::post('/auth/member/complete-activation', [AuthController::class, 'completeActivation']);
     Route::post('/auth/admin/login', [AuthController::class, 'loginAdmin']);
 
     // Reset password petugas via link dari Super Admin (publik, dibatasi 10 permintaan/menit per IP)
@@ -256,6 +260,8 @@ Route::prefix('v1')->group(function () {
             Route::post('/members/{id}/approve-ktp', [MemberManagementController::class, 'approveKtp'])->whereNumber('id');
             Route::post('/members/{id}/reject-ktp', [MemberManagementController::class, 'rejectKtp'])->whereNumber('id');
             Route::post('/members/{id}/check-identity', [MemberManagementController::class, 'checkIdentity'])->whereNumber('id')->middleware('throttle:30,1');
+            Route::post('/members/{id}/resend-activation', [MemberManagementController::class, 'resendActivation'])->whereNumber('id');
+            Route::put('/members/{id}/change-email', [MemberManagementController::class, 'changeEmail'])->whereNumber('id');
 
             // Modul Keranjang Bermasalah (Mutasi & Tindak Lanjut)
             Route::post('/problem-carts', [ProblemCartController::class, 'store']);
@@ -279,6 +285,8 @@ Route::prefix('v1')->group(function () {
             Route::get('/access/activity-logs', [AdminAccessController::class, 'activityLogs']);
             Route::post('/access/users', [AdminAccessController::class, 'store']);
             Route::put('/access/users/{id}', [AdminAccessController::class, 'update'])->whereNumber('id');
+            Route::post('/access/stop-impersonation', [AdminAccessController::class, 'stopImpersonation']);
+            Route::get('/access/impersonation/current', [AdminAccessController::class, 'currentImpersonation']);
         });
 
         // =========================================================================
@@ -292,6 +300,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('/users/{id}/reset-link', [AdminPasswordResetController::class, 'status'])->whereNumber('id');
                 Route::delete('/users/{id}/reset-link', [AdminPasswordResetController::class, 'revoke'])->whereNumber('id');
                 Route::delete('/users/{id}', [AdminAccessController::class, 'destroy'])->whereNumber('id');
+                Route::post('/users/{id}/impersonate', [AdminAccessController::class, 'impersonate'])->whereNumber('id');
             });
         });
 

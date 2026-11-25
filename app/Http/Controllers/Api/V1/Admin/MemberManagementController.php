@@ -5,19 +5,29 @@ namespace App\Http\Controllers\Api\V1\Admin;
 use App\Services\WebpImageStorage;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\MemberResource;
+use App\Mail\MemberActivationMail;
 use App\Models\LockedIdentityNumber;
 use App\Models\Member;
+use App\Services\AdminActivityLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 
 class MemberManagementController extends Controller
 {
+    protected AdminActivityLogger $activityLogger;
+
+    public function __construct(AdminActivityLogger $activityLogger)
+    {
+        $this->activityLogger = $activityLogger;
+    }
     /**
      * Get paginated member list with search, filter, and statistics summary
      */
@@ -51,6 +61,12 @@ class MemberManagementController extends Controller
         }
 
         // Filter Status Keanggotaan & Kasus Bermasalah
+        // Filter Activation Status (Digital Account Status)
+        if ($request->filled('activation_status') && $request->activation_status !== 'all') {
+            $actStatus = strtoupper(trim($request->activation_status));
+            $query->where('activation_status', $actStatus);
+        }
+
         // Default: Sembunyikan anggota bermasalah agar langsung hilang dari Entri Anggota dan masuk ke Keranjang Bermasalah
         $statusFilter = $request->get('status', 'aktif');
         if (empty($statusFilter) || in_array(strtolower($statusFilter), ['aktif', 'aktif bebas pustaka'])) {
@@ -114,6 +130,18 @@ class MemberManagementController extends Controller
 
         $pendingVerificationsCount = Member::where('status', 'Menunggu Verifikasi')->count();
 
+        // Activation status statistics
+        $actMenungguCount = Member::where('activation_status', Member::ACTIVATION_STATUS_MENUNGGU_AKTIVASI)->count();
+        $actGagalCount = Member::where('activation_status', Member::ACTIVATION_STATUS_GAGAL_DIKIRIM)->count();
+        $actTerverifikasiCount = Member::whereIn('activation_status', [
+            Member::ACTIVATION_STATUS_TERVERIFIKASI,
+            Member::ACTIVATION_STATUS_MENUNGGU_PASSWORD,
+        ])->count();
+        $actAktifCount = Member::where(function ($q) {
+            $q->where('activation_status', Member::ACTIVATION_STATUS_AKTIF)
+              ->orWhereNull('activation_status');
+        })->count();
+
         $calcPercent = function ($count, $total) {
             if ($total <= 0) return '0.0%';
             return number_format(($count / $total) * 100, 1) . '%';
@@ -133,6 +161,12 @@ class MemberManagementController extends Controller
                 'pelajar_percent'            => $calcPercent($pelajarCount, $totalMembers),
                 'mahasiswa_count'            => $mahasiswaCount,
                 'mahasiswa_percent'          => $calcPercent($mahasiswaCount, $totalMembers),
+                'activation_stats'           => [
+                    'menunggu_aktivasi' => $actMenungguCount,
+                    'gagal_dikirim'     => $actGagalCount,
+                    'terverifikasi'     => $actTerverifikasiCount,
+                    'aktif'             => $actAktifCount,
+                ],
             ],
             'next_member_no' => Member::generateAtlasMemberNo(),
         ]);
@@ -245,42 +279,254 @@ class MemberManagementController extends Controller
         // Email: Wajib dan dinormalisasi huruf kecil
         $email = strtolower(trim($validated['email']));
 
-        // Auto-generate temporary password for offline registration
-        $autoPassword = 'Atlas-' . strtoupper(Str::random(4)) . rand(100, 999) . '!';
+        // Sesuai PROSES BISNIS AKTIVASI AKUN ANGGOTA MELALUI EMAIL – SISTEM ATLAS:
+        // Petugas loket tidak membuat atau mengetahui password anggota.
+        // Akun dibuat dengan status Menunggu Aktivasi dan password di-hash secara acak yang tidak dapat ditebak.
+        // Token aktivasi one-time dikirimkan ke email anggota dengan batas waktu 24 jam.
+        $rawActivationToken = Str::random(64);
+        $activationTokenHash = Member::hashActivationToken($rawActivationToken);
+        $activationExpiresAt = now()->addHours(24);
 
         // Valid until date (5 years from creation)
         $validUntil = now()->addYears(5)->format('Y-m-d');
 
         $member = Member::create([
-            'member_no'            => $memberNo,
-            'nik'                  => $validated['nik'] ?? null,
-            'name'                 => $validated['name'],
-            'gender'               => $validated['gender'],
-            'place_of_birth'       => $validated['place_of_birth'],
-            'date_of_birth'        => $validated['date_of_birth'],
-            'job_category'         => $jobCategory,
-            'institution_name'     => $validated['institution_name'],
-            'max_loans'            => $maxLoans,
-            'phone_number'         => $validated['phone_number'],
-            'email'                => $email,
-            'password'             => Hash::make($autoPassword),
-            'must_change_password' => true,
-            'ktp_address'          => $validated['ktp_address'],
-            'residential_address'  => $validated['residential_address'],
-            'photo_path'           => $photoPath,
-            'ktp_photo_path'       => null,
-            'status'               => $validated['status'] ?? 'Aktif Bebas Pustaka',
-            'valid_until'          => $validUntil,
-            'ktp_verified_at'      => now(),
-            'ktp_verified_by'      => auth()->id(),
+            'member_no'                => $memberNo,
+            'nik'                      => $validated['nik'] ?? null,
+            'name'                     => $validated['name'],
+            'gender'                   => $validated['gender'],
+            'place_of_birth'           => $validated['place_of_birth'],
+            'date_of_birth'            => $validated['date_of_birth'],
+            'job_category'             => $jobCategory,
+            'institution_name'         => $validated['institution_name'],
+            'max_loans'                => $maxLoans,
+            'phone_number'             => $validated['phone_number'],
+            'email'                    => $email,
+            'password'                 => Hash::make(Str::random(32)),
+            'must_change_password'     => false,
+            'activation_status'        => Member::ACTIVATION_STATUS_MENUNGGU_AKTIVASI,
+            'activation_token_hash'    => $activationTokenHash,
+            'activation_sent_at'       => now(),
+            'activation_expires_at'    => $activationExpiresAt,
+            'activation_failed_reason' => null,
+            'ktp_address'              => $validated['ktp_address'],
+            'residential_address'      => $validated['residential_address'],
+            'photo_path'               => $photoPath,
+            'ktp_photo_path'           => null,
+            'status'                   => $validated['status'] ?? 'Aktif Bebas Pustaka',
+            'valid_until'              => $validUntil,
+            'ktp_verified_at'          => now(),
+            'ktp_verified_by'          => auth()->id(),
         ]);
 
+        $emailSent = false;
+        $failedReason = null;
+        try {
+            Mail::to($email)->send(new MemberActivationMail($member, $rawActivationToken));
+            $emailSent = true;
+            $member->update([
+                'activation_status'        => Member::ACTIVATION_STATUS_MENUNGGU_AKTIVASI,
+                'activation_sent_at'       => now(),
+                'activation_failed_reason' => null,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error("Gagal mengirim email aktivasi ke {$email}: " . $e->getMessage());
+            $failedReason = 'Gagal mengirim email: ' . $e->getMessage();
+            $member->update([
+                'activation_status'        => Member::ACTIVATION_STATUS_GAGAL_DIKIRIM,
+                'activation_failed_reason' => $failedReason,
+            ]);
+        }
+
+        // Catat ke log aktivitas admin
+        $this->activityLogger->log(
+            $request,
+            auth()->user(),
+            'MEMBER_REGISTRATION_OFFLINE',
+            null,
+            [
+                'email'             => $email,
+                'activation_status' => $member->activation_status,
+                'email_sent'        => $emailSent,
+                'failed_reason'     => $failedReason,
+            ],
+            "Pendaftaran offline anggota {$member->name} ({$member->member_no}). Email aktivasi " . ($emailSent ? 'berhasil dikirim ke ' . $email : 'gagal dikirim: ' . $failedReason),
+            ['member_id' => $member->id, 'member_name' => $member->name, 'member_no' => $member->member_no]
+        );
+
         return response()->json([
-            'success'            => true,
-            'message'            => "Anggota {$member->name} ({$member->member_no}) berhasil didaftarkan!",
-            'data'               => new MemberResource($member),
-            'generated_password' => $autoPassword,
+            'success'           => true,
+            'message'           => "Anggota {$member->name} ({$member->member_no}) berhasil didaftarkan. Email aktivasi akun telah " . ($emailSent ? 'berhasil dikirim ke ' . $email . '.' : 'gagal dikirim. Silakan periksa status di detail anggota.'),
+            'data'              => new MemberResource($member->fresh()),
+            'activation_sent'   => $emailSent,
+            'activation_status' => $member->activation_status,
         ], 201);
+    }
+
+    /**
+     * Kirim ulang email aktivasi akun anggota (Process 3.7 & 3.8)
+     */
+    public function resendActivation(Request $request, int $id): JsonResponse
+    {
+        $member = Member::find($id);
+        if (!$member) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Data anggota tidak ditemukan.',
+            ], 404);
+        }
+
+        if ($member->activation_status === Member::ACTIVATION_STATUS_AKTIF) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Akun digital anggota sudah aktif. Tidak perlu mengirim ulang email aktivasi.',
+            ], 422);
+        }
+
+        if (empty($member->email)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Anggota tidak memiliki alamat email. Silakan gunakan fitur Ubah Email terlebih dahulu.',
+            ], 422);
+        }
+
+        $rawToken = Str::random(64);
+        $tokenHash = Member::hashActivationToken($rawToken);
+        $expiresAt = now()->addHours(24);
+
+        $emailSent = false;
+        $failedReason = null;
+        try {
+            Mail::to($member->email)->send(new MemberActivationMail($member, $rawToken));
+            $emailSent = true;
+            $member->update([
+                'activation_status'        => Member::ACTIVATION_STATUS_MENUNGGU_AKTIVASI,
+                'activation_token_hash'    => $tokenHash,
+                'activation_sent_at'       => now(),
+                'activation_expires_at'    => $expiresAt,
+                'activation_failed_reason' => null,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error("Gagal mengirim ulang email aktivasi ke {$member->email}: " . $e->getMessage());
+            $failedReason = 'Gagal mengirim email: ' . $e->getMessage();
+            $member->update([
+                'activation_status'        => Member::ACTIVATION_STATUS_GAGAL_DIKIRIM,
+                'activation_failed_reason' => $failedReason,
+            ]);
+        }
+
+        $this->activityLogger->log(
+            $request,
+            auth()->user(),
+            'MEMBER_ACTIVATION_RESEND',
+            null,
+            ['email' => $member->email, 'email_sent' => $emailSent, 'failed_reason' => $failedReason],
+            "Kirim ulang email aktivasi akun anggota {$member->name} ({$member->member_no}) ke {$member->email}.",
+            ['member_id' => $member->id, 'member_name' => $member->name, 'member_no' => $member->member_no]
+        );
+
+        return response()->json([
+            'success'           => $emailSent,
+            'message'           => $emailSent
+                ? "Email aktivasi berhasil dikirim ulang ke {$member->email}."
+                : "Gagal mengirim email aktivasi ke {$member->email}. Alasan: {$failedReason}",
+            'data'              => new MemberResource($member->fresh()),
+            'activation_sent'   => $emailSent,
+            'activation_status' => $member->activation_status,
+        ], $emailSent ? 200 : 500);
+    }
+
+    /**
+     * Ubah alamat email anggota dengan verifikasi identitas fisik resmi (Process 3.3 - 3.6)
+     */
+    public function changeEmail(Request $request, int $id): JsonResponse
+    {
+        $member = Member::find($id);
+        if (!$member) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Data anggota tidak ditemukan.',
+            ], 404);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'email' => [
+                'required',
+                'email',
+                'max:255',
+                Rule::unique('members', 'email')->ignore($member->id),
+            ],
+            'identity_confirmed' => ['required', 'boolean', 'accepted'],
+            'notes'              => ['nullable', 'string', 'max:500'],
+        ], [
+            'email.required'              => 'Alamat email baru wajib diisi.',
+            'email.email'                 => 'Format email tidak valid.',
+            'email.unique'                => 'Alamat email ini sudah terdaftar untuk anggota lain.',
+            'identity_confirmed.accepted' => 'Petugas wajib memverifikasi dan mencentang konfirmasi identitas fisik anggota.',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => $validator->errors()->first(),
+                'errors'  => $validator->errors(),
+            ], 422);
+        }
+
+        $oldEmail = $member->email;
+        $newEmail = strtolower(trim($request->email));
+
+        // Buat token aktivasi baru dan batalkan token aktivasi sebelumnya (Process 3.5)
+        $rawToken = Str::random(64);
+        $tokenHash = Member::hashActivationToken($rawToken);
+        $expiresAt = now()->addHours(24);
+
+        $member->email = $newEmail;
+        $member->activation_token_hash = $tokenHash;
+        $member->activation_expires_at = $expiresAt;
+        $member->activation_sent_at = now();
+        $member->save();
+
+        $emailSent = false;
+        $failedReason = null;
+        try {
+            Mail::to($newEmail)->send(new MemberActivationMail($member, $rawToken));
+            $emailSent = true;
+            $member->update([
+                'activation_status'        => Member::ACTIVATION_STATUS_MENUNGGU_AKTIVASI,
+                'activation_failed_reason' => null,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error("Gagal mengirim email aktivasi ke {$newEmail}: " . $e->getMessage());
+            $failedReason = 'Gagal mengirim email: ' . $e->getMessage();
+            $member->update([
+                'activation_status'        => Member::ACTIVATION_STATUS_GAGAL_DIKIRIM,
+                'activation_failed_reason' => $failedReason,
+            ]);
+        }
+
+        $this->activityLogger->log(
+            $request,
+            auth()->user(),
+            'MEMBER_EMAIL_CHANGE_ACTIVATION',
+            null,
+            [
+                'old_email'   => $oldEmail,
+                'new_email'   => $newEmail,
+                'notes'       => $request->notes,
+                'email_sent'  => $emailSent,
+            ],
+            "Perubahan email anggota {$member->name} ({$member->member_no}) dari {$oldEmail} ke {$newEmail} setelah verifikasi identitas resmi. Email aktivasi baru " . ($emailSent ? 'berhasil dikirim.' : 'gagal dikirim.'),
+            ['member_id' => $member->id, 'member_name' => $member->name, 'member_no' => $member->member_no]
+        );
+
+        return response()->json([
+            'success'           => true,
+            'message'           => "Alamat email berhasil diperbarui menjadi {$newEmail}. Email aktivasi baru " . ($emailSent ? 'telah dikirim.' : 'gagal dikirim. Silakan cek detail anggota.'),
+            'data'              => new MemberResource($member->fresh()),
+            'activation_sent'   => $emailSent,
+            'activation_status' => $member->activation_status,
+        ], 200);
     }
 
     /**
@@ -430,6 +676,26 @@ class MemberManagementController extends Controller
 
         $member->update($memberData);
 
+        $admin = $request->user();
+        if ($admin instanceof \App\Models\Admin) {
+            $diffChanges = [];
+            foreach (['name', 'email', 'phone_number', 'job_category', 'institution_name', 'status'] as $f) {
+                if (isset($memberData[$f]) && $memberData[$f] !== $member->getOriginal($f)) {
+                    $diffChanges[$f] = ['from' => $member->getOriginal($f), 'to' => $memberData[$f]];
+                }
+            }
+            $this->activityLogger->log(
+                $request,
+                $admin,
+                'member_updated',
+                $member,
+                $diffChanges,
+                "Pembaruan data anggota {$member->name} ({$member->member_no}).",
+                null,
+                'Keanggotaan'
+            );
+        }
+
         return response()->json([
             'success' => true,
             'message' => "Data anggota {$member->name} berhasil diperbarui.",
@@ -486,12 +752,20 @@ class MemberManagementController extends Controller
             }
         });
 
-        Log::info('Perpanjangan masa berlaku anggota', [
-            'admin_id'  => auth()->id(),
-            'extended'  => array_column($extended, 'id'),
-            'unchanged' => $unchanged,
-            'skipped'   => count($skipped),
-        ]);
+        // Dicatat di Log Aktivitas Admin seperti perubahan data anggota lainnya
+        $admin = $request->user();
+        if ($admin instanceof \App\Models\Admin && count($extended) > 0) {
+            $this->activityLogger->log(
+                $request,
+                $admin,
+                'member_bulk_extended',
+                null,
+                ['valid_until' => ['from' => null, 'to' => $target->toDateString()]],
+                'Perpanjangan masa berlaku ' . count($extended) . ' anggota hingga ' . $target->format('d/m/Y') . '.',
+                null,
+                'Keanggotaan'
+            );
+        }
 
         $message = count($extended) . ' anggota diperpanjang hingga ' . $target->format('d/m/Y') . '.';
         if (count($unchanged) > 0) {
@@ -709,6 +983,20 @@ class MemberManagementController extends Controller
             ]);
         }
 
+        $admin = $request->user();
+        if ($admin instanceof \App\Models\Admin) {
+            $this->activityLogger->log(
+                $request,
+                $admin,
+                'member_approved',
+                $member,
+                ['status' => ['from' => Member::STATUS_PENDING, 'to' => 'Aktif Bebas Pustaka']],
+                "Verifikasi tatap muka disetujui untuk anggota {$member->name} ({$member->member_no}).",
+                null,
+                'Keanggotaan'
+            );
+        }
+
         return response()->json([
             'success' => true,
             'message' => $correctedNik
@@ -806,6 +1094,20 @@ class MemberManagementController extends Controller
             'document_type' => $member->identity_document_type,
             'reason'        => $request->reason,
         ]);
+
+        $admin = $request->user();
+        if ($admin instanceof \App\Models\Admin) {
+            $this->activityLogger->log(
+                $request,
+                $admin,
+                'member_rejected',
+                $member,
+                ['status' => ['from' => Member::STATUS_PENDING, 'to' => 'Ditolak'], 'reason' => ['from' => null, 'to' => $request->reason]],
+                "Verifikasi ditolak untuk pendaftar {$name}. Alasan: {$request->reason}",
+                ['id' => $member->id, 'name' => $name, 'username' => $memberNo, 'role' => 'Anggota'],
+                'Keanggotaan'
+            );
+        }
 
         return response()->json([
             'success' => true,

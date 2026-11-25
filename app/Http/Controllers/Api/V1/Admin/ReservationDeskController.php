@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Api\V1\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\Admin;
 use App\Models\Loan;
+use App\Services\AdminActivityLogger;
 use App\Services\CirculationService;
 use Exception;
 use Illuminate\Database\Eloquent\Builder;
@@ -112,8 +114,12 @@ class ReservationDeskController extends Controller
      */
     public function confirmReady(Request $request, int $id): JsonResponse
     {
-        return $this->runAction(fn () => $this->circulationService->confirmReady($id, $request->user()?->id),
-            fn (Loan $loan) => "Reservasi {$loan->reservation_code} siap diambil. Batas pengambilan: " . $loan->pickup_deadline?->format('d/m/Y') . '.');
+        return $this->runAction(
+            fn () => $this->circulationService->confirmReady($id, $request->user()?->id),
+            fn (Loan $loan) => "Reservasi {$loan->reservation_code} siap diambil. Batas pengambilan: " . $loan->pickup_deadline?->format('d/m/Y') . '.',
+            'reservation_ready',
+            $request
+        );
     }
 
     /**
@@ -121,8 +127,12 @@ class ReservationDeskController extends Controller
      */
     public function markUnavailable(Request $request, int $id): JsonResponse
     {
-        return $this->runAction(fn () => $this->circulationService->markUnavailable($id, null, $request->user()?->id),
-            fn (Loan $loan) => "Reservasi {$loan->reservation_code} ditandai Tidak Tersedia. Kuota anggota dikembalikan.");
+        return $this->runAction(
+            fn () => $this->circulationService->markUnavailable($id, null, $request->user()?->id),
+            fn (Loan $loan) => "Reservasi {$loan->reservation_code} ditandai Tidak Tersedia. Kuota anggota dikembalikan.",
+            'reservation_unavailable',
+            $request
+        );
     }
 
     /**
@@ -159,11 +169,13 @@ class ReservationDeskController extends Controller
 
         return $this->runAction(
             fn () => $this->circulationService->confirmPickup($loan->reservation_code, $request->user()?->id, (int) $validated['duration_days']),
-            fn (Loan $loan) => "Buku diserahkan kepada {$loan->member?->name}. No. Peminjaman {$loan->loan_number}, jatuh tempo " . $loan->due_date?->format('d/m/Y') . '.'
+            fn (Loan $loan) => "Buku diserahkan kepada {$loan->member?->name}. No. Peminjaman {$loan->loan_number}, jatuh tempo " . $loan->due_date?->format('d/m/Y') . '.',
+            'reservation_picked_up',
+            $request
         );
     }
 
-    private function runAction(callable $action, callable $message): JsonResponse
+    private function runAction(callable $action, callable $message, ?string $actionType = null, ?Request $request = null): JsonResponse
     {
         try {
             $loan = $action();
@@ -175,6 +187,25 @@ class ReservationDeskController extends Controller
         }
 
         $loan->load(['member', 'collection.catalog', 'createdByAdmin']);
+
+        if ($actionType && $request) {
+            $admin = $request->user();
+            if ($admin instanceof Admin) {
+                app(AdminActivityLogger::class)->log(
+                    $request,
+                    $admin,
+                    $actionType,
+                    $loan->member,
+                    [
+                        'code'   => ['from' => null, 'to' => $loan->reservation_code],
+                        'status' => ['from' => null, 'to' => $loan->status],
+                    ],
+                    $message($loan),
+                    null,
+                    'Layanan Sirkulasi'
+                );
+            }
+        }
 
         return response()->json([
             'success' => true,

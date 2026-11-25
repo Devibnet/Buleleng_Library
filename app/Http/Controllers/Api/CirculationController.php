@@ -347,6 +347,24 @@ class CirculationController extends Controller
 
             $loan->load(['member', 'collection.catalog']);
 
+            $admin = $request->user();
+            if ($admin instanceof \App\Models\Admin) {
+                app(\App\Services\AdminActivityLogger::class)->log(
+                    $request,
+                    $admin,
+                    'loan_renewed',
+                    $loan->member,
+                    [
+                        'barcode_no' => ['from' => null, 'to' => $request->input('book_barcode')],
+                        'extension'  => ['from' => null, 'to' => "Ke-{$loan->extension_count}"],
+                        'due_date'   => ['from' => null, 'to' => $loan->due_date->format('Y-m-d')],
+                    ],
+                    "Perpanjangan peminjaman buku barcode '{$request->input('book_barcode')}' untuk anggota {$loan->member?->name} hingga " . $loan->due_date->format('d/m/Y') . ".",
+                    null,
+                    'Layanan Sirkulasi'
+                );
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => "Peminjaman buku barcode '{$request->input('book_barcode')}' berhasil diperpanjang hingga " . $loan->due_date->format('Y-m-d') . ". (Perpanjangan ke-{$loan->extension_count})",
@@ -430,6 +448,24 @@ class CirculationController extends Controller
             $loan = $this->circulationService->confirmReady($id, $operatorAdmin?->id);
             $loan->load(['member', 'collection.catalog']);
 
+            $admin = $request->user();
+            if ($admin instanceof \App\Models\Admin) {
+                app(\App\Services\AdminActivityLogger::class)->log(
+                    $request,
+                    $admin,
+                    'loan_renewed',
+                    $loan->member,
+                    [
+                        'barcode_no' => ['from' => null, 'to' => $request->input('book_barcode')],
+                        'extension'  => ['from' => null, 'to' => "Ke-{$loan->extension_count}"],
+                        'due_date'   => ['from' => null, 'to' => $loan->due_date->format('Y-m-d')],
+                    ],
+                    "Perpanjangan peminjaman buku barcode '{$request->input('book_barcode')}' untuk anggota {$loan->member?->name} hingga " . $loan->due_date->format('d/m/Y') . ".",
+                    null,
+                    'Layanan Sirkulasi'
+                );
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => "Reservasi #{$loan->loan_number} berhasil diverifikasi! Physical book ready for pickup. Deadline: " . $loan->pickup_deadline?->format('d/m/Y H:i'),
@@ -492,6 +528,24 @@ class CirculationController extends Controller
                 $operatorAdmin?->id
             );
             $loan->load(['member', 'collection.catalog']);
+
+            $admin = $request->user();
+            if ($admin instanceof \App\Models\Admin) {
+                app(\App\Services\AdminActivityLogger::class)->log(
+                    $request,
+                    $admin,
+                    'loan_renewed',
+                    $loan->member,
+                    [
+                        'barcode_no' => ['from' => null, 'to' => $request->input('book_barcode')],
+                        'extension'  => ['from' => null, 'to' => "Ke-{$loan->extension_count}"],
+                        'due_date'   => ['from' => null, 'to' => $loan->due_date->format('Y-m-d')],
+                    ],
+                    "Perpanjangan peminjaman buku barcode '{$request->input('book_barcode')}' untuk anggota {$loan->member?->name} hingga " . $loan->due_date->format('d/m/Y') . ".",
+                    null,
+                    'Layanan Sirkulasi'
+                );
+            }
 
             return response()->json([
                 'success' => true,

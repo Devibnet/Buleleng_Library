@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Api\V1\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\CatalogResource;
 use App\Http\Resources\CollectionResource;
+use App\Models\Admin;
 use App\Models\Catalog;
 use App\Models\Collection;
+use App\Services\AdminActivityLogger;
 use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -323,6 +325,23 @@ class QuarantineController extends Controller
 
             DB::commit();
 
+            $admin = $request->user();
+            if ($admin instanceof Admin) {
+                app(AdminActivityLogger::class)->log(
+                    $request,
+                    $admin,
+                    'quarantine_moved',
+                    null,
+                    [
+                        'action' => ['from' => null, 'to' => 'Pindah ke Karantina'],
+                        'reason' => ['from' => null, 'to' => $reason],
+                    ],
+                    "Pemindahan koleksi buku ke karantina. Alasan: {$reason}.",
+                    null,
+                    'Karantina Koleksi'
+                );
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => 'Koleksi berhasil dipindahkan ke keranjang karantina.',
@@ -429,6 +448,23 @@ class QuarantineController extends Controller
 
             DB::commit();
 
+            $admin = $request->user();
+            if ($admin instanceof Admin) {
+                app(AdminActivityLogger::class)->log(
+                    $request,
+                    $admin,
+                    'quarantine_moved',
+                    null,
+                    [
+                        'action' => ['from' => null, 'to' => 'Pindah ke Karantina'],
+                        'reason' => ['from' => null, 'to' => $reason],
+                    ],
+                    "Pemindahan koleksi buku ke karantina. Alasan: {$reason}.",
+                    null,
+                    'Karantina Koleksi'
+                );
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => "Katalog \"{$catalog->title}\" berhasil diterbitkan ke OPAC Publik!",
@@ -497,6 +533,23 @@ class QuarantineController extends Controller
 
             DB::commit();
 
+            $admin = $request->user();
+            if ($admin instanceof Admin) {
+                app(AdminActivityLogger::class)->log(
+                    $request,
+                    $admin,
+                    'quarantine_moved',
+                    null,
+                    [
+                        'action' => ['from' => null, 'to' => 'Pindah ke Karantina'],
+                        'reason' => ['from' => null, 'to' => $reason],
+                    ],
+                    "Pemindahan koleksi buku ke karantina. Alasan: {$reason}.",
+                    null,
+                    'Karantina Koleksi'
+                );
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => count($ids) . ' item berhasil dipulihkan ke status Tersedia / OPAC Publik!',
@@ -540,6 +593,23 @@ class QuarantineController extends Controller
             }
 
             DB::commit();
+
+            $admin = $request->user();
+            if ($admin instanceof Admin) {
+                app(AdminActivityLogger::class)->log(
+                    $request,
+                    $admin,
+                    'quarantine_moved',
+                    null,
+                    [
+                        'action' => ['from' => null, 'to' => 'Pindah ke Karantina'],
+                        'reason' => ['from' => null, 'to' => $reason],
+                    ],
+                    "Pemindahan koleksi buku ke karantina. Alasan: {$reason}.",
+                    null,
+                    'Karantina Koleksi'
+                );
+            }
 
             return response()->json([
                 'success' => true,

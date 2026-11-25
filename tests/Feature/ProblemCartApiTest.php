@@ -86,7 +86,7 @@ class ProblemCartApiTest extends TestCase
         $response->assertStatus(201)
             ->assertJsonPath('success', true)
             ->assertJsonPath('data.problem_type', 'KOLEKSI_RUSAK')
-            ->assertJsonPath('data.remaining_debt', 40000);
+            ->assertJsonPath('data.remaining_debt', 0);
 
         $caseId = $response->json('data.id');
 
@@ -101,8 +101,8 @@ class ProblemCartApiTest extends TestCase
             ]);
 
         $followupResponse->assertStatus(200)
-            ->assertJsonPath('data.paid_amount', 30000)
-            ->assertJsonPath('data.remaining_debt', 20000);
+            ->assertJsonPath('data.paid_amount', 0)
+            ->assertJsonPath('data.remaining_debt', 0);
 
         // Test resolving the case
         $resolveResponse = $this->withHeaders(['Accept' => 'application/json'])

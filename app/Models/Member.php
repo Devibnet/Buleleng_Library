@@ -225,6 +225,12 @@ class Member extends Authenticatable
         'verification_expires_at',
         'must_change_password',
         'password_changed_at',
+        'activation_status',
+        'activation_token_hash',
+        'activation_sent_at',
+        'activation_expires_at',
+        'activation_verified_at',
+        'activation_failed_reason',
     ];
 
     protected $hidden = [
@@ -302,7 +308,34 @@ class Member extends Authenticatable
             'password' => 'hashed',
             'must_change_password' => 'boolean',
             'password_changed_at' => 'datetime',
+            'activation_sent_at' => 'datetime',
+            'activation_expires_at' => 'datetime',
+            'activation_verified_at' => 'datetime',
         ];
+    }
+
+    public const ACTIVATION_STATUS_MENUNGGU_AKTIVASI = 'MENUNGGU_AKTIVASI';
+    public const ACTIVATION_STATUS_GAGAL_DIKIRIM     = 'GAGAL_DIKIRIM';
+    public const ACTIVATION_STATUS_TERVERIFIKASI     = 'TERVERIFIKASI';
+    public const ACTIVATION_STATUS_MENUNGGU_PASSWORD = 'MENUNGGU_PASSWORD';
+    public const ACTIVATION_STATUS_AKTIF             = 'AKTIF';
+
+    public const ACTIVATION_STATUSES = [
+        self::ACTIVATION_STATUS_MENUNGGU_AKTIVASI => 'Menunggu Aktivasi',
+        self::ACTIVATION_STATUS_GAGAL_DIKIRIM     => 'Gagal Dikirim',
+        self::ACTIVATION_STATUS_TERVERIFIKASI     => 'Terverifikasi',
+        self::ACTIVATION_STATUS_MENUNGGU_PASSWORD => 'Menunggu Password',
+        self::ACTIVATION_STATUS_AKTIF             => 'Aktif',
+    ];
+
+    public function getActivationStatusLabelAttribute(): string
+    {
+        return self::ACTIVATION_STATUSES[$this->activation_status ?? 'AKTIF'] ?? ($this->activation_status ?? 'Aktif');
+    }
+
+    public static function hashActivationToken(string $token): string
+    {
+        return hash('sha256', $token);
     }
 
     /**

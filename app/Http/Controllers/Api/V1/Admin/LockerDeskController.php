@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Api\V1\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\Admin;
 use App\Models\Locker;
 use App\Models\LockerLoan;
 use App\Models\Member;
+use App\Services\AdminActivityLogger;
 use App\Services\LockerService;
 use Carbon\Carbon;
 use Exception;
@@ -136,6 +138,23 @@ class LockerDeskController extends Controller
         }
 
         $loan->load(['member', 'locker', 'processedByAdmin']);
+
+        $admin = $request->user();
+        if ($admin instanceof Admin) {
+            app(AdminActivityLogger::class)->log(
+                $request,
+                $admin,
+                'locker_borrowed',
+                $loan->member,
+                [
+                    'locker_number' => ['from' => null, 'to' => $loan->locker?->locker_code],
+                    'deposit_type'  => ['from' => null, 'to' => $loan->deposit_type],
+                ],
+                "Peminjaman kunci loker {$loan->locker?->locker_code} untuk {$loan->member?->name} ({$loan->member?->member_no}).",
+                null,
+                'Loker Penitipan'
+            );
+        }
 
         return response()->json([
             'success' => true,

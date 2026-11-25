@@ -7,8 +7,10 @@ use App\Http\Requests\StoreBookRequest;
 use App\Http\Requests\UpdateCatalogRequest;
 use App\Http\Requests\UpdateCollectionRequest;
 use App\Imports\BooksStockOpnameImport;
+use App\Models\Admin;
 use App\Models\Catalog;
 use App\Models\Collection;
+use App\Services\AdminActivityLogger;
 use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -265,6 +267,23 @@ class BookManagementController extends Controller
 
             DB::commit();
 
+            $admin = $request->user();
+            if ($admin instanceof Admin) {
+                app(AdminActivityLogger::class)->log(
+                    $request,
+                    $admin,
+                    'book_created',
+                    null,
+                    [
+                        'title'      => ['from' => null, 'to' => $catalog->title],
+                        'barcode_no' => ['from' => null, 'to' => $collection->barcode_no],
+                    ],
+                    "Pendaftaran judul buku baru: {$catalog->title} (Barcode: {$collection->barcode_no}).",
+                    ['id' => $catalog->id, 'name' => $catalog->title, 'username' => $collection->barcode_no, 'role' => 'Katalog Buku'],
+                    'Master Buku & Koleksi'
+                );
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => 'Data buku dan eksemplar berhasil disimpan.',
@@ -314,7 +333,24 @@ class BookManagementController extends Controller
     public function updateCatalog(UpdateCatalogRequest $request, int $id): JsonResponse
     {
         $catalog = Catalog::findOrFail($id);
+        $oldTitle = $catalog->title;
         $catalog->update($request->validated());
+
+        $admin = $request->user();
+        if ($admin instanceof Admin) {
+            app(AdminActivityLogger::class)->log(
+                $request,
+                $admin,
+                'book_updated',
+                null,
+                [
+                    'title' => ['from' => $oldTitle, 'to' => $catalog->title],
+                ],
+                "Pembaruan katalog buku: {$catalog->title}.",
+                ['id' => $catalog->id, 'name' => $catalog->title, 'role' => 'Katalog Buku'],
+                'Master Buku & Koleksi'
+            );
+        }
 
         return response()->json([
             'success' => true,
@@ -354,11 +390,28 @@ class BookManagementController extends Controller
      */
     public function updateCollection(UpdateCollectionRequest $request, int $collection_id): JsonResponse
     {
-        $collection = Collection::findOrFail($collection_id);
+        $collection = Collection::with('catalog')->findOrFail($collection_id);
+        $oldBarcode = $collection->barcode_no;
         $collection->update($request->validated());
 
         // Sync total & available copies katalog pemilik
         $this->syncCatalogCopyCounts($collection->catalog_id);
+
+        $admin = $request->user();
+        if ($admin instanceof Admin) {
+            app(AdminActivityLogger::class)->log(
+                $request,
+                $admin,
+                'collection_updated',
+                null,
+                [
+                    'barcode_no' => ['from' => $oldBarcode, 'to' => $collection->barcode_no],
+                ],
+                "Pembaruan eksemplar koleksi buku: {$collection->catalog?->title} ({$collection->barcode_no}).",
+                ['id' => $collection->id, 'name' => $collection->catalog?->title, 'username' => $collection->barcode_no, 'role' => 'Eksemplar Buku'],
+                'Master Buku & Koleksi'
+            );
+        }
 
         return response()->json([
             'success' => true,
@@ -386,15 +439,32 @@ class BookManagementController extends Controller
      *     )
      * )
      */
-    public function destroyCatalog(int $id): JsonResponse
+    public function destroyCatalog(Request $request, int $id): JsonResponse
     {
         $catalog = Catalog::findOrFail($id);
+        $title = $catalog->title;
 
         DB::beginTransaction();
         try {
             $catalog->collections()->delete();
             $catalog->delete();
             DB::commit();
+
+            $admin = $request->user();
+            if ($admin instanceof Admin) {
+                app(AdminActivityLogger::class)->log(
+                    $request,
+                    $admin,
+                    'book_deleted',
+                    null,
+                    [
+                        'title' => ['from' => $title, 'to' => null],
+                    ],
+                    "Penghapusan katalog buku: {$title} beserta seluruh eksemplarnya.",
+                    ['id' => $id, 'name' => $title, 'role' => 'Katalog Buku'],
+                    'Master Buku & Koleksi'
+                );
+            }
 
             return response()->json([
                 'success' => true,
@@ -428,16 +498,34 @@ class BookManagementController extends Controller
      *     )
      * )
      */
-    public function destroyCollection(int $collection_id): JsonResponse
+    public function destroyCollection(Request $request, int $collection_id): JsonResponse
     {
-        $collection = Collection::findOrFail($collection_id);
+        $collection = Collection::with('catalog')->findOrFail($collection_id);
         $catalogId = $collection->catalog_id;
+        $barcode = $collection->barcode_no;
+        $title = $collection->catalog?->title ?? 'Buku';
 
         DB::beginTransaction();
         try {
             $collection->delete();
             $this->syncCatalogCopyCounts($catalogId);
             DB::commit();
+
+            $admin = $request->user();
+            if ($admin instanceof Admin) {
+                app(AdminActivityLogger::class)->log(
+                    $request,
+                    $admin,
+                    'collection_deleted',
+                    null,
+                    [
+                        'barcode_no' => ['from' => $barcode, 'to' => null],
+                    ],
+                    "Penghapusan eksemplar koleksi buku: {$title} ({$barcode}).",
+                    ['id' => $collection_id, 'name' => $title, 'username' => $barcode, 'role' => 'Eksemplar Buku'],
+                    'Master Buku & Koleksi'
+                );
+            }
 
             return response()->json([
                 'success' => true,
@@ -448,6 +536,7 @@ class BookManagementController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Gagal menghapus eksemplar: ' . $e->getMessage(),
+                'line'    => $e->getLine(),
             ], 500);
         }
     }

@@ -2,15 +2,37 @@
 
 namespace App\Services;
 
+use App\Mail\LoanDueDateNotificationMail;
 use App\Models\Catalog;
 use App\Models\Collection;
 use App\Models\Loan;
 use App\Models\Member;
 use Exception;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 
 class LoanService
 {
+    /**
+     * Kirim email informasi peminjaman & tenggat pengembalian buku (due date)
+     */
+    public function sendLoanDueDateEmail(Loan $loan, string $type = LoanDueDateNotificationMail::TYPE_NEW_LOAN): void
+    {
+        $loan->loadMissing(['member', 'collection.catalog']);
+        $email = $loan->member?->email;
+
+        if (empty($email)) {
+            return;
+        }
+
+        try {
+            Mail::to($email)->send(new LoanDueDateNotificationMail($loan, $type));
+        } catch (\Throwable $e) {
+            Log::warning("Gagal mengirim email tenggat pinjam ({$type}) ke {$email}: " . $e->getMessage());
+        }
+    }
+
     /**
      * 1. JALUR ONLINE: Member reservasi buku via website
      */
@@ -90,6 +112,10 @@ class LoanService
 
             return $loan;
         });
+
+        $this->sendLoanDueDateEmail($loan, LoanDueDateNotificationMail::TYPE_NEW_LOAN);
+
+        return $loan;
     }
 
     /**
@@ -143,6 +169,10 @@ class LoanService
 
             return $loan;
         });
+
+        $this->sendLoanDueDateEmail($loan, LoanDueDateNotificationMail::TYPE_NEW_LOAN);
+
+        return $loan;
     }
 
     /**

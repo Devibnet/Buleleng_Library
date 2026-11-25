@@ -4,10 +4,12 @@ namespace App\Http\Controllers\Api\V1\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\LoanResource;
+use App\Models\Admin;
 use App\Models\Collection;
 use App\Models\Loan;
 use App\Models\Member;
 use App\Models\MemberCart;
+use App\Services\AdminActivityLogger;
 use App\Services\CirculationService;
 use Exception;
 use Illuminate\Http\JsonResponse;
@@ -134,6 +136,25 @@ class ReturnController extends Controller
 
         $loans->each->load(['member', 'collection.catalog', 'returnedByAdmin']);
         $totalFine = 0;
+
+        $admin = $request->user();
+        $firstMember = $loans->first()?->member;
+        if ($admin instanceof Admin && $firstMember) {
+            $barcodes = collect($validated['items'])->pluck('barcode')->implode(', ');
+            app(AdminActivityLogger::class)->log(
+                $request,
+                $admin,
+                'loan_returned',
+                $firstMember,
+                [
+                    'returned_count' => ['from' => null, 'to' => $loans->count()],
+                    'barcodes'       => ['from' => null, 'to' => $barcodes],
+                ],
+                "Pengembalian {$loans->count()} buku dari anggota {$firstMember->name} ({$firstMember->member_no}) di loket sirkulasi.",
+                null,
+                'Layanan Sirkulasi'
+            );
+        }
 
         $message = "Pengembalian {$loans->count()} eksemplar berhasil diproses.";
 

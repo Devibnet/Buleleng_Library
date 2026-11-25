@@ -89,6 +89,22 @@ class LockerController extends Controller
 
             $loan->load(['member', 'locker', 'processedByAdmin']);
 
+            $admin = $request->user() ?? $operatorAdmin;
+            if ($admin instanceof \App\Models\Admin) {
+                app(\App\Services\AdminActivityLogger::class)->log(
+                    $request,
+                    $admin,
+                    'locker_returned',
+                    $loan->member,
+                    [
+                        'locker_number' => ['from' => null, 'to' => $loan->locker?->locker_code],
+                    ],
+                    "Pengembalian kunci loker {$loan->locker?->locker_code} dari {$loan->member?->name} ({$loan->member?->member_no}).",
+                    null,
+                    'Loker Penitipan'
+                );
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => "Peminjaman kunci loker {$loan->locker->locker_code} berhasil dicatat! No. Transaksi: {$loan->loan_number}.",
@@ -155,6 +171,22 @@ class LockerController extends Controller
             );
 
             $loan->load(['member', 'locker', 'processedByAdmin']);
+
+            $admin = $request->user() ?? $operatorAdmin;
+            if ($admin instanceof \App\Models\Admin) {
+                app(\App\Services\AdminActivityLogger::class)->log(
+                    $request,
+                    $admin,
+                    'locker_returned',
+                    $loan->member,
+                    [
+                        'locker_number' => ['from' => null, 'to' => $loan->locker?->locker_code],
+                    ],
+                    "Pengembalian kunci loker {$loan->locker?->locker_code} dari {$loan->member?->name} ({$loan->member?->member_no}).",
+                    null,
+                    'Loker Penitipan'
+                );
+            }
 
             return response()->json([
                 'success' => true,

@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Http\Controllers\Auth\GoogleAuthController;
 use App\Http\Controllers\Controller;
 use App\Models\Guestbook;
 use App\Models\Loan;
 use App\Models\LoanExtension;
+use App\Models\LockedIdentityNumber;
 use App\Models\LockerLoan;
 use App\Models\Member;
 use App\Models\MemberCart;
@@ -14,6 +16,7 @@ use App\Models\ReservedCollection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
@@ -443,13 +446,19 @@ class ProfileController extends Controller
     /**
      * Hapus akun milik anggota sendiri beserta seluruh datanya (UU PDP: hak penghapusan data pribadi).
      *
-     * Ditolak bila masih ada urusan yang belum selesai dengan perpustakaan: buku yang sedang dipinjam,
-     * kasus Keranjang Bermasalah (denda, buku rusak/hilang), atau loker yang belum dikembalikan.
+     * Ditolak selama masih ada buku yang sedang dipinjam atau kunci loker yang belum dikembalikan.
      * Reservasi yang masih menunggu dibatalkan dan eksemplarnya dikembalikan ke rak.
      *
+     * Akun bermasalah (masih ada kasus Keranjang Bermasalah yang belum selesai) TETAP boleh dihapus, tetapi
+     * nomor identitasnya dikunci di `locked_identity_numbers` bersama catatan kasusnya. Nomor itu tidak bisa
+     * dipakai mendaftar lagi sampai petugas membuka kuncinya setelah urusannya selesai di loket.
+     *
+     * Bukti pemilik akun: kata sandi. Akun Google memakai masuk ulang dengan Google (lihat
+     * GoogleAuthController::deleteAccountRedirect), karena kata sandinya dibuat acak oleh sistem.
+     *
      * Yang dihapus: data anggota, pas foto, token login, riwayat pinjam + perpanjangan, reservasi,
-     * favorit, riwayat keranjang bermasalah (yang sudah selesai), riwayat loker, serta buku tamu dan
-     * catatan baca di tempat milik anggota ini.
+     * favorit, riwayat keranjang bermasalah, riwayat loker, serta buku tamu dan catatan baca di tempat
+     * milik anggota ini.
      */
     public function destroy(Request $request): JsonResponse
     {
@@ -465,59 +474,67 @@ class ProfileController extends Controller
         $request->validate([
             'confirm'  => ['accepted'],
             'password' => ['nullable', 'string'],
-            'email'    => ['nullable', 'string'],
         ], [
             'confirm.accepted' => 'Centang pernyataan persetujuan sebelum menghapus akun.',
         ]);
 
-        // Bukti pemilik akun: kata sandi. Akun Google tidak punya kata sandi yang diketahui pemiliknya
-        // (dibuat acak saat mendaftar), jadi untuk akun Google cukup mengetik ulang alamat emailnya.
-        $password = (string) $request->input('password', '');
-        if ($password !== '') {
-            if (! Hash::check($password, $member->password)) {
+        // Hambatan dicek sebelum bukti pemilik, supaya tanda masuk ulang Google tidak terpakai percuma
+        if ($blocked = self::accountDeletionBlockReason($member)) {
+            return $this->deleteBlocked($blocked);
+        }
+
+        if (! empty($member->google_id)) {
+            // Tanda sekali pakai dari masuk ulang Google (berlaku 10 menit)
+            if (! Cache::pull(GoogleAuthController::DELETE_REAUTH_CACHE . $member->id)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Kata sandi salah.',
-                    'errors'  => ['password' => ['Kata sandi salah.']],
-                ], 422);
-            }
-        } elseif (! empty($member->google_id)) {
-            $typedEmail = mb_strtolower(trim((string) $request->input('email', '')));
-            if ($typedEmail === '' || $typedEmail !== mb_strtolower($member->email)) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Alamat email yang diketik tidak sama dengan email akun Anda.',
-                    'errors'  => ['email' => ['Alamat email yang diketik tidak sama dengan email akun Anda.']],
+                    'message' => 'Masuk ulang dengan Google dulu untuk memastikan ini akun Anda, lalu hapus akun dalam 10 menit.',
+                    'errors'  => ['google' => ['Masuk ulang dengan Google dulu.']],
                 ], 422);
             }
         } else {
-            return response()->json([
-                'success' => false,
-                'message' => 'Masukkan kata sandi akun Anda untuk menghapus akun.',
-                'errors'  => ['password' => ['Masukkan kata sandi akun Anda untuk menghapus akun.']],
-            ], 422);
-        }
+            $password = (string) $request->input('password', '');
+            if ($password === '' || ! Hash::check($password, $member->password)) {
+                $message = $password === '' ? 'Masukkan kata sandi akun Anda untuk menghapus akun.' : 'Kata sandi salah.';
 
-        $activeLoans = $member->loans()
-            ->whereIn('status', [Loan::STATUS_BORROWED, Loan::STATUS_OVERDUE])
-            ->count();
-        if ($activeLoans > 0) {
-            return $this->deleteBlocked("Akun belum bisa dihapus karena masih ada {$activeLoans} buku yang Anda pinjam. Kembalikan bukunya di DAPD Buleleng terlebih dahulu.");
-        }
-
-        $openCases = $member->memberCarts()->where('is_resolved', false)->count();
-        if ($openCases > 0) {
-            return $this->deleteBlocked("Akun belum bisa dihapus karena masih ada {$openCases} kasus di Keranjang Bermasalah (misalnya buku belum dikembalikan atau rusak/hilang). Selesaikan dulu di loket DAPD Buleleng.");
-        }
-
-        $activeLockers = $member->lockerLoans()->whereIn('status', ['ACTIVE', 'OVERDUE', 'VIOLATION'])->count();
-        if ($activeLockers > 0) {
-            return $this->deleteBlocked('Akun belum bisa dihapus karena kunci loker belum dikembalikan. Kembalikan kunci loker ke petugas terlebih dahulu.');
+                return response()->json([
+                    'success' => false,
+                    'message' => $message,
+                    'errors'  => ['password' => [$message]],
+                ], 422);
+            }
         }
 
         $catalogs = [];
+        $locked = false;
 
-        DB::transaction(function () use ($member, &$catalogs) {
+        DB::transaction(function () use ($member, &$catalogs, &$locked) {
+            // Akun bermasalah: kunci nomor identitasnya beserta catatan kasus yang belum selesai, sebelum
+            // baris kasusnya ikut terhapus. Nomor asli tidak disimpan, hanya sidik dan bentuk tersamar.
+            $openCases = $member->memberCarts()->where('is_resolved', false)->get();
+            if ($openCases->isNotEmpty()) {
+                LockedIdentityNumber::create([
+                    'nik_hash'         => $member->nik_hash,
+                    'number_kind'      => Member::identityNumberKind($member->identity_document_type),
+                    'masked_number'    => $member->masked_identity_number,
+                    'former_member_no' => $member->member_no,
+                    'cases'            => $openCases->map(fn (MemberCart $c) => [
+                        'problem_type'       => $c->problem_type,
+                        'item_title'         => $c->item_title,
+                        'item_call_number'   => $c->item_call_number,
+                        'item_barcode'       => $c->item_barcode,
+                        'description'        => $c->description,
+                        'fine_amount'        => (float) $c->fine_amount,
+                        'paid_amount'        => (float) $c->paid_amount,
+                        'reported_date'      => $c->reported_date?->toDateString(),
+                        'late_duration_text' => $c->late_duration_text,
+                        'action_status'      => $c->action_status,
+                    ])->values()->all(),
+                    'locked_at'        => now(),
+                ]);
+                $locked = true;
+            }
+
             // Reservasi yang masih menunggu: kembalikan eksemplar ke rak bila masih dipegang reservasi ini
             $reservations = $member->loans()
                 ->whereIn('status', [Loan::STATUS_PENDING_CHECK, Loan::STATUS_READY_FOR_PICKUP, Loan::STATUS_RESERVED])
@@ -561,9 +578,33 @@ class ProfileController extends Controller
         }
 
         return response()->json([
-            'success' => true,
-            'message' => 'Akun dan seluruh data Anda sudah dihapus.',
+            'success'          => true,
+            'identity_locked'  => $locked,
+            'message'          => $locked
+                ? 'Akun dan data diri Anda sudah dihapus. Nomor identitas Anda dikunci sampai kasus yang belum selesai diurus di loket DAPD Buleleng.'
+                : 'Akun dan seluruh data Anda sudah dihapus.',
         ], 200);
+    }
+
+    /**
+     * Alasan akun belum boleh dihapus, atau null bila boleh. Kasus Keranjang Bermasalah tidak menghalangi
+     * (nomor identitasnya dikunci saat penghapusan).
+     */
+    public static function accountDeletionBlockReason(Member $member): ?string
+    {
+        $activeLoans = $member->loans()
+            ->whereIn('status', [Loan::STATUS_BORROWED, Loan::STATUS_OVERDUE])
+            ->count();
+        if ($activeLoans > 0) {
+            return "Akun belum bisa dihapus karena masih ada {$activeLoans} buku yang Anda pinjam. Kembalikan bukunya di DAPD Buleleng terlebih dahulu.";
+        }
+
+        $activeLockers = $member->lockerLoans()->whereIn('status', ['ACTIVE', 'OVERDUE', 'VIOLATION'])->count();
+        if ($activeLockers > 0) {
+            return 'Akun belum bisa dihapus karena kunci loker belum dikembalikan. Kembalikan kunci loker ke petugas terlebih dahulu.';
+        }
+
+        return null;
     }
 
     protected function deleteBlocked(string $message): JsonResponse

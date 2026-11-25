@@ -106,7 +106,7 @@ class QuarantineController extends Controller
                 'ddc_number'           => $cat?->ddc_number ?? '',
                 'catalog_call_number'  => $col->exemplar_call_number ?: ($cat?->catalog_call_number ?? ''),
                 'subject_topic'        => $cat?->subject_topic ?? 'Koleksi Umum',
-                'abstract'             => $col->quarantine_notes ?: ($cat?->abstract ?? ''),
+                'abstract'             => $cat?->abstract ?? '',
                 'is_rda'               => true,
                 'total_copies'         => $cat?->total_copies ?? 1,
                 'available_copies'     => $cat?->available_copies ?? 0,

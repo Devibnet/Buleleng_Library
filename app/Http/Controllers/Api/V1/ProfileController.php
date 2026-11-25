@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Services\WebpImageStorage;
 use App\Http\Controllers\Auth\GoogleAuthController;
 use App\Http\Controllers\Controller;
 use App\Models\Guestbook;
@@ -274,7 +275,7 @@ class ProfileController extends Controller
                     Storage::disk('public')->delete($oldRel);
                 }
             }
-            $validated['photo_path'] = $request->file('photo')->store('profile-photos', 'public');
+            $validated['photo_path'] = WebpImageStorage::storeUploaded($request->file('photo'), 'profile-photos', 'profile');
             unset($validated['photo']);
         }
 
@@ -355,7 +356,7 @@ class ProfileController extends Controller
             }
         }
 
-        $newPhotoPath = $file->store('profile-photos', 'public');
+        $newPhotoPath = WebpImageStorage::storeUploaded($file, 'profile-photos', 'profile', $fileKey);
 
         $member->update([
             'photo_path' => $newPhotoPath,

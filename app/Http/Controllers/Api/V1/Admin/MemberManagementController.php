@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1\Admin;
 
+use App\Services\WebpImageStorage;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\MemberResource;
 use App\Models\LockedIdentityNumber;
@@ -227,9 +228,7 @@ class MemberManagementController extends Controller
         if ($request->hasFile('photo')) {
             $file = $request->file('photo');
             if ($file->isValid()) {
-                $filename = 'mbr_' . time() . '_' . Str::random(8) . '.' . $file->getClientOriginalExtension();
-                Storage::disk('public')->put('photos/members/' . $filename, file_get_contents($file->getPathname()));
-                $photoPath = '/storage/photos/members/' . $filename;
+                $photoPath = '/storage/' . WebpImageStorage::storeUploaded($file, 'photos/members', 'mbr');
             }
         } elseif (!empty($request->photo_base64) && is_string($request->photo_base64)) {
             // Camera snapshot base64 data URI
@@ -238,10 +237,7 @@ class MemberManagementController extends Controller
                 $base64Data = substr($base64, strpos($base64, ',') + 1);
                 $decoded = base64_decode($base64Data);
                 if ($decoded !== false) {
-                    $ext = strtolower($type[1]) === 'png' ? 'png' : 'jpg';
-                    $filename = 'cam_' . time() . '_' . Str::random(8) . '.' . $ext;
-                    Storage::disk('public')->put('photos/members/' . $filename, $decoded);
-                    $photoPath = '/storage/photos/members/' . $filename;
+                    $photoPath = '/storage/' . WebpImageStorage::storeBinary($decoded, 'photos/members', 'cam');
                 }
             }
         }
@@ -399,9 +395,7 @@ class MemberManagementController extends Controller
         if ($request->hasFile('photo')) {
             $file = $request->file('photo');
             if ($file->isValid()) {
-                $filename = 'mbr_' . time() . '_' . Str::random(8) . '.' . $file->getClientOriginalExtension();
-                Storage::disk('public')->put('photos/members/' . $filename, file_get_contents($file->getPathname()));
-                $photoPath = '/storage/photos/members/' . $filename;
+                $photoPath = '/storage/' . WebpImageStorage::storeUploaded($file, 'photos/members', 'mbr');
             }
         } elseif (!empty($request->photo_base64) && is_string($request->photo_base64)) {
             $base64 = $request->photo_base64;
@@ -409,10 +403,7 @@ class MemberManagementController extends Controller
                 $base64Data = substr($base64, strpos($base64, ',') + 1);
                 $decoded = base64_decode($base64Data);
                 if ($decoded !== false) {
-                    $ext = strtolower($type[1]) === 'png' ? 'png' : 'jpg';
-                    $filename = 'cam_' . time() . '_' . Str::random(8) . '.' . $ext;
-                    Storage::disk('public')->put('photos/members/' . $filename, $decoded);
-                    $photoPath = '/storage/photos/members/' . $filename;
+                    $photoPath = '/storage/' . WebpImageStorage::storeBinary($decoded, 'photos/members', 'cam');
                 }
             }
         }
@@ -446,82 +437,77 @@ class MemberManagementController extends Controller
         ]);
     }
 
+    // Akun anggota hanya dapat dihapus oleh anggota itu sendiri (DELETE /profile).
+    // Petugas (super admin, admin, operator) tidak diberi endpoint hapus anggota.
+
     /**
-     * Delete single member with validation & confirmation support
+     * Perpanjang masa berlaku kartu beberapa anggota sekaligus.
+     *
+     * Aturan: masa berlaku baru = hari ini + 5 tahun (sama dengan saat pendaftaran),
+     * dan tidak pernah memperpendek masa berlaku yang sudah lebih panjang.
+     * Karena itu perpanjangan yang ditekan dua kali tidak menumpuk menjadi 10 tahun.
+     * Pemohon online yang belum diverifikasi dilewati.
      */
-    public function destroy(int $id): JsonResponse
+    public function bulkExtend(Request $request): JsonResponse
     {
-        $member = Member::find($id);
-        if (!$member) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Anggota tidak ditemukan.',
-            ], 404);
-        }
-
-        // Check if member has active loans
-        $activeLoansCount = $member->loans()
-            ->whereIn('loan_status', ['BORROWED', 'PENDING_RETURN', 'WAITING_PAYMENT', 'EXTENDED'])
-            ->count();
-
-        if ($activeLoansCount > 0) {
-            return response()->json([
-                'success' => false,
-                'message' => "Tidak dapat menghapus anggota {$member->name}. Anggota masih memiliki {$activeLoansCount} peminjaman aktif yang belum dikembalikan.",
-            ], 422);
-        }
-
-        $name = $member->name;
-        $memberNo = $member->member_no;
-        $member->delete();
-
-        return response()->json([
-            'success' => true,
-            'message' => "Anggota {$name} ({$memberNo}) berhasil dihapus.",
+        $validated = $request->validate([
+            'ids'   => ['required', 'array', 'min:1', 'max:500'],
+            'ids.*' => ['integer'],
+        ], [
+            'ids.required' => 'Pilih setidaknya satu anggota untuk diperpanjang.',
+            'ids.min'      => 'Pilih setidaknya satu anggota untuk diperpanjang.',
+            'ids.max'      => 'Maksimal 500 anggota dalam sekali perpanjangan.',
         ]);
-    }
 
-    /**
-     * Bulk Delete selected members
-     */
-    public function bulkDestroy(Request $request): JsonResponse
-    {
-        $ids = $request->input('ids', []);
-        if (empty($ids) || !is_array($ids)) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Pilih setidaknya satu anggota untuk dihapus.',
-            ], 422);
-        }
-
-        $members = Member::whereIn('id', $ids)->get();
-        $deletedCount = 0;
+        $target = now()->startOfDay()->addYears(5);
+        $extended = [];
+        $unchanged = [];
         $skipped = [];
 
-        foreach ($members as $m) {
-            $hasActiveLoans = $m->loans()
-                ->whereIn('loan_status', ['BORROWED', 'PENDING_RETURN', 'WAITING_PAYMENT', 'EXTENDED'])
-                ->exists();
+        DB::transaction(function () use ($validated, $target, &$extended, &$unchanged, &$skipped) {
+            $members = Member::whereIn('id', $validated['ids'])->lockForUpdate()->get();
 
-            if ($hasActiveLoans) {
-                $skipped[] = "{$m->name} ({$m->member_no}) - memiliki pinjaman aktif";
-                continue;
+            foreach ($members as $member) {
+                if ($member->status === Member::STATUS_PENDING) {
+                    $skipped[] = "{$member->name} ({$member->member_no}): pendaftaran belum diverifikasi";
+                    continue;
+                }
+
+                if ($member->valid_until && $member->valid_until->greaterThanOrEqualTo($target)) {
+                    $unchanged[] = $member->id;
+                    continue;
+                }
+
+                $member->update(['valid_until' => $target->toDateString()]);
+                $extended[] = [
+                    'id'          => $member->id,
+                    'valid_until' => $target->toDateString(),
+                ];
             }
+        });
 
-            $m->delete();
-            $deletedCount++;
+        Log::info('Perpanjangan masa berlaku anggota', [
+            'admin_id'  => auth()->id(),
+            'extended'  => array_column($extended, 'id'),
+            'unchanged' => $unchanged,
+            'skipped'   => count($skipped),
+        ]);
+
+        $message = count($extended) . ' anggota diperpanjang hingga ' . $target->format('d/m/Y') . '.';
+        if (count($unchanged) > 0) {
+            $message .= ' ' . count($unchanged) . ' anggota sudah berlaku hingga tanggal itu atau lebih.';
         }
-
-        $message = "Berhasil menghapus {$deletedCount} anggota.";
         if (count($skipped) > 0) {
-            $message .= " " . count($skipped) . " anggota dilewati karena memiliki peminjaman aktif.";
+            $message .= ' ' . count($skipped) . ' anggota dilewati.';
         }
 
         return response()->json([
-            'success' => true,
-            'message' => $message,
-            'deleted_count' => $deletedCount,
-            'skipped' => $skipped,
+            'success'        => true,
+            'message'        => $message,
+            'valid_until'    => $target->toDateString(),
+            'extended'       => $extended,
+            'unchanged_ids'  => $unchanged,
+            'skipped'        => $skipped,
         ]);
     }
 

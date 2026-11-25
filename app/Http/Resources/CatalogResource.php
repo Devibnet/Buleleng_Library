@@ -34,6 +34,7 @@ class CatalogResource extends JsonResource
             'subject_topic'               => $this->subject_topic,
             'language'                    => $this->language,
             'abstract'                    => $this->abstract,
+            'cover_url'                   => $this->cover_url,
             'total_copies'                => (int) $this->total_copies,
             'available_copies'            => (int) $this->available_copies,
             'borrowed_copies'             => $this->relationLoaded('collections')
